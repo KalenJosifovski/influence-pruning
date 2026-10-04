@@ -8,8 +8,8 @@ app = marimo.App(width="full")
 
 @app.cell
 def _():
-    from textwrap import dedent
     import pathlib
+    from textwrap import dedent
 
     import marimo as mo
     import numpy as np

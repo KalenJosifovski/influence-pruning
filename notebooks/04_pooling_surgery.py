@@ -39,12 +39,9 @@ def _():
     import marimo as mo
 
     _roots = [pathlib.Path.cwd()]
-    try:
-        _root = pathlib.Path(mo.notebook_dir())
-        if _root not in _roots:
-            _roots.append(_root)
-    except Exception:
-        pass
+    _notebook_root = mo.notebook_dir()
+    if _notebook_root is not None and _notebook_root not in _roots:
+        _roots.append(_notebook_root)
 
     # molab bootstrap: restore the self-extracting upload bundle when running outside the
     # repository checkout (no-op locally, where the zip is absent).
@@ -135,12 +132,11 @@ def _():
         "donor_only": "External donors",
     }
     STATUS_COLOURS = {
-        "validated": "#2E7D32",
-        "leaning": "#C97A00",
-        "unclear": "#9E9E9E",
-        "contradicted": "#C62828",
-        "pooled edges": "#4C78A8",
-        "local edges": "#E45756",
+        "interval excludes zero": "#2E7D32",
+        "direction consistent": "#C97A00",
+        "inconclusive": "#9E9E9E",
+        "pooled better": "#4C78A8",
+        "local-only better": "#E45756",
     }
 
     def style_figure(figure, title, height=460, **overrides):
@@ -206,9 +202,7 @@ def _(json, mo, np, pathlib, pd):
         errors_ranked = (observed[:, None] - ranked) ** 2
         n_draws, n_molecules, n_seeds = controls.shape
         error_controls = (observed[None, :, None] - controls) ** 2
-        flat_controls = error_controls.transpose(1, 0, 2).reshape(
-            n_molecules, n_draws * n_seeds
-        )
+        flat_controls = error_controls.transpose(1, 0, 2).reshape(n_molecules, n_draws * n_seeds)
 
         def statistic(weights):
             total = weights.sum(axis=1, keepdims=True)
@@ -233,10 +227,9 @@ def _(json, mo, np, pathlib, pd):
         directory = pathlib.Path(run_dir)
         analysis_root = pathlib.Path("analysis/effects_recomputed")
         if not analysis_root.parent.is_dir():
-            try:
-                analysis_root = pathlib.Path(mo.notebook_dir()) / "analysis/effects_recomputed"
-            except Exception:
-                pass
+            _notebook_root = mo.notebook_dir()
+            if _notebook_root is not None:
+                analysis_root = _notebook_root / "analysis/effects_recomputed"
         destination = analysis_root / directory.name
         if (destination / "paired_effects.parquet").is_file() and (
             destination / "bootstrap_draws.parquet"
@@ -279,10 +272,7 @@ def _(json, mo, np, pathlib, pd):
                     )
                 else:
                     controls = np.stack(
-                        [
-                            matrices[control]
-                            for control in json.loads(record["control_arm_ids"])
-                        ],
+                        [matrices[control] for control in json.loads(record["control_arm_ids"])],
                         axis=0,
                     )
                     point, values = _boot_median_control(
@@ -321,9 +311,7 @@ def _(json, mo, np, pathlib, pd):
         ranked_ids = set(
             effects.loc[effects["comparison_kind"].isin(ranked_kinds), "comparison_id"]
         )
-        return effects, draws.loc[draws["comparison_id"].isin(ranked_ids)].reset_index(
-            drop=True
-        )
+        return effects, draws.loc[draws["comparison_id"].isin(ranked_ids)].reset_index(drop=True)
 
     return (corrected_effects,)
 
@@ -333,10 +321,9 @@ def _(ArtifactError, corrected_effects, mo, pathlib, pd, verify_run):
     def _load_runs():
         run_root = pathlib.Path("results/boostin_pruning")
         if not run_root.is_dir():
-            try:
-                run_root = pathlib.Path(mo.notebook_dir()) / "results/boostin_pruning"
-            except Exception:
-                pass
+            _notebook_root = mo.notebook_dir()
+            if _notebook_root is not None:
+                run_root = _notebook_root / "results/boostin_pruning"
         completed = sorted(
             path.parent
             for path in run_root.glob("*/run_facts.json")
@@ -363,9 +350,9 @@ def _(ArtifactError, corrected_effects, mo, pathlib, pd, verify_run):
                 "directory": directory,
                 "facts": facts,
                 "manifest": pd.read_parquet(directory / "partition_manifest.parquet"),
-                "scores": pd.read_parquet(
-                    directory / "boostin_scores.parquet"
-                ).drop_duplicates("candidate_id"),
+                "scores": pd.read_parquet(directory / "boostin_scores.parquet").drop_duplicates(
+                    "candidate_id"
+                ),
                 "effects": effects,
                 "draws": draws,
                 "arm_manifest": pd.read_parquet(directory / "arm_manifest.parquet"),
@@ -378,9 +365,7 @@ def _(ArtifactError, corrected_effects, mo, pathlib, pd, verify_run):
                 ),
             }
         if not payloads:
-            raise FileNotFoundError(
-                "only dry-run artifacts were found; no scientific run to show"
-            )
+            raise FileNotFoundError("only dry-run artifacts were found; no scientific run to show")
         return payloads
 
     runs = _load_runs()
@@ -461,11 +446,14 @@ def _(dedent, mo):
         dedent(
             """
             ## 1 · The verdict at a glance
-    
-            One row per claim, one column per target rotation. Evidence strength comes from
-            cluster-bootstrap resampling of the frozen predictions, not from p-values. **Green**
-            means the interval excludes zero; **amber** means at least four in five resamples agree;
-            **grey** means the contrast is unresolved.
+
+            One row per claim, one column per target rotation. The intervals are percentile
+            intervals from resampling whole evaluation clusters (2,000 draws) of the *same*
+            evaluation set; they describe evaluation-set uncertainty, not independent replication.
+            **Green** marks intervals that exclude zero; **amber** marks intervals that include
+            zero but where at least four in five resamples agree on the sign; **grey** is
+            inconclusive at this evaluation-set size. The matched controls preserve source
+            composition and within-source label quantile bins, not continuous label values.
             """
         )
     )
@@ -473,7 +461,7 @@ def _(dedent, mo):
 
 
 @app.cell
-def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
+def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, mo, np, runs):
     def _contract():
         def contrast(draws, effects, pool, stratum, batch_size, kind):
             subset = effects.loc[
@@ -486,9 +474,7 @@ def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
             low = subset.loc[subset["direction"].eq("low"), "comparison_id"]
             if high.empty or low.empty:
                 return None
-            pivot = draws.pivot(
-                index="resample_index", columns="comparison_id", values="effect"
-            )
+            pivot = draws.pivot(index="resample_index", columns="comparison_id", values="effect")
             if high.iloc[0] not in pivot.columns or low.iloc[0] not in pivot.columns:
                 return None
             delta = pivot[low.iloc[0]] - pivot[high.iloc[0]]
@@ -501,9 +487,7 @@ def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
 
         def best(draws, effects, kind, candidates):
             sizes = sorted(
-                effects.loc[effects["comparison_kind"].eq(kind), "batch_size"]
-                .dropna()
-                .unique(),
+                effects.loc[effects["comparison_kind"].eq(kind), "batch_size"].dropna().unique(),
                 reverse=True,
             )
             for pool, stratum in candidates:
@@ -513,19 +497,21 @@ def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
                         return block, pool, stratum, int(size)
             return None, None, None, None
 
-        def state(p_value):
-            if p_value >= 0.95:
-                return "validated"
-            if p_value >= 0.80:
-                return "leaning"
-            return "unclear"
+        def status(block):
+            if block is None:
+                return "inconclusive"
+            if block["lo"] > 0 or block["hi"] < 0:
+                return "interval excludes zero"
+            if block["p"] >= 0.80 or block["p"] <= 0.20:
+                return "direction consistent"
+            return "inconclusive"
 
         def evidence(block, pool, size):
             if block is None:
                 return "no completed contrast"
             return (
                 f"Δ {block['median']:+.3f} [{block['lo']:+.3f}, {block['hi']:+.3f}] · "
-                f"{block['p'] * 100:.0f}% agree · {POOL_LABELS[pool]} k={size}"
+                f"{block['p'] * 100:.0f}% of resamples agree · {POOL_LABELS[pool]} k={size}"
             )
 
         card = {}
@@ -540,13 +526,21 @@ def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
                 f"[{baseline['ci_low']:+.3f}, {baseline['ci_high']:+.3f}]"
             )
             if baseline["ci_high"] < 0:
-                pooling = ("pooled wins", "validated", interval)
+                pooling = ("pooled better", "interval excludes zero", interval)
             elif baseline["ci_low"] > 0:
-                pooling = ("local wins", "validated", interval)
+                pooling = ("local-only better", "interval excludes zero", interval)
             elif baseline["effect"] < 0:
-                pooling = ("pooled edges", "pooled edges", interval + " · ns")
+                pooling = (
+                    "pooled better",
+                    "inconclusive",
+                    interval + " · point estimate only",
+                )
             else:
-                pooling = ("local edges", "local edges", interval + " · ns")
+                pooling = (
+                    "local-only better",
+                    "inconclusive",
+                    interval + " · point estimate only",
+                )
             native, native_pool, _, native_size = best(
                 draws, effects, "ranked_vs_random_median", [("native_only", "target")]
             )
@@ -576,31 +570,29 @@ def _(POOL_LABELS, STATUS_COLOURS, TARGET_ORDER, TARGET_STYLE, np, runs):
             )
 
         claim_rows = [
-            ("Pooling beats local-only", lambda block: block["pooling"]),
+            ("Pooling vs local-only", lambda block: block["pooling"]),
             (
-                "Native high-influence deletion hurts more",
+                "Native high-vs-low deletion contrast",
                 lambda block: (
-                    state(block["native"][0]["p"]) if block["native"][0] else "unclear",
-                    state(block["native"][0]["p"]) if block["native"][0] else "unclear",
+                    status(block["native"][0]),
+                    status(block["native"][0]),
                     evidence(block["native"][0], block["native"][1], block["native"][2]),
                 ),
             ),
             (
-                "Mixed high-influence deletion hurts more",
+                "Mixed high-vs-low deletion contrast",
                 lambda block: (
-                    state(block["mixed"][0]["p"]) if block["mixed"][0] else "unclear",
-                    state(block["mixed"][0]["p"]) if block["mixed"][0] else "unclear",
+                    status(block["mixed"][0]),
+                    status(block["mixed"][0]),
                     evidence(block["mixed"][0], block["mixed"][1], block["mixed"][2]),
                 ),
             ),
             (
-                "Signal survives label + source matching",
+                "Direction under the source + label-quantile control",
                 lambda block: (
-                    state(block["matched"][0]["p"]) if block["matched"][0] else "unclear",
-                    state(block["matched"][0]["p"]) if block["matched"][0] else "unclear",
-                    evidence(
-                        block["matched"][0], block["matched"][1], block["matched"][2]
-                    ),
+                    status(block["matched"][0]),
+                    status(block["matched"][0]),
+                    evidence(block["matched"][0], block["matched"][1], block["matched"][2]),
                 ),
             ),
         ]
@@ -650,10 +642,11 @@ def _(scorecard_html):
 def _(mo):
     mo.callout(
         mo.md(
-            "The pattern is the story: **pooling itself is target-dependent** — it edges ahead "
-            "for ExpansionRx and Polaris but trails for Biogen, and no interval excludes zero — "
-            "yet **the influence direction survives on native chemistry in all three "
-            "rotations**, and survives label/source matching where the contrast is powered."
+            "The pattern is the story: the **pooling point estimate flips sign** across rotations "
+            "and every pooling interval includes zero, while the **native high-vs-low deletion "
+            "contrast interval excludes zero in all three rotations**. Under the coarse "
+            "source + label-quantile control, the interval excludes zero only for ExpansionRx; "
+            "Biogen and Polaris remain inconclusive at their evaluation-set sizes."
         ),
         kind="success",
     )
@@ -691,9 +684,7 @@ def _(TARGET_ORDER, pd, runs):
 def _(TARGET_STYLE, baseline_table, go, style_figure):
     def _forest():
         labels = [TARGET_STYLE[target]["label"] for target in baseline_table["target"]]
-        colours = [
-            "#4C78A8" if effect < 0 else "#E45756" for effect in baseline_table["effect"]
-        ]
+        colours = ["#4C78A8" if effect < 0 else "#E45756" for effect in baseline_table["effect"]]
         figure = go.Figure()
         figure.add_trace(
             go.Scatter(
@@ -714,9 +705,7 @@ def _(TARGET_STYLE, baseline_table, go, style_figure):
                     "width": 7,
                     "color": "#555555",
                 },
-                customdata=baseline_table[
-                    ["full_rmse", "local_rmse", "n_eval", "n_clusters"]
-                ],
+                customdata=baseline_table[["full_rmse", "local_rmse", "n_eval", "n_clusters"]],
                 hovertemplate=(
                     "ΔRMSE = %{x:+.4f}<br>full pooled RMSE = %{customdata[0]:.3f}<br>"
                     "local-only RMSE = %{customdata[1]:.3f}<br>%{customdata[2]} eval "
@@ -755,14 +744,15 @@ def _(dedent, mo):
         dedent(
             """
             ## 2 · The scalpel: dose–response of a ranked deletion
-    
+
             Each point is `RMSE(high-influence removal) − RMSE(low-influence removal)` under the
-            same random-control comparison, recomputed with paired resample draws. Positive values
-            (green field) mean the ranking pointed the right way: removing molecules it called
-            helpful hurt the target model more than removing the ones it called harmful. Marker
-            area encodes the fraction of resamples that agree on the sign. **Each panel has its own
-            y-scale**, so the donor panels are readable even though their effects are an order of
-            magnitude smaller than the native panels.
+            same random-control comparison, recomputed with paired resample draws of the same
+            evaluation clusters. Positive values (green field) mean the ranking pointed the right
+            way: removing molecules it called helpful hurt the target model more than removing the
+            ones it called harmful. Marker area encodes the fraction of resamples that agree on
+            the sign — a stability summary for this evaluation set, not a probability that the
+            claim is true. **Each panel has its own y-scale**, so the donor panels are readable
+            even though their effects are an order of magnitude smaller than the native panels.
             """
         )
     )
@@ -775,9 +765,7 @@ def _(np, pd, runs, rotation):
         payload = runs[rotation.value]
         effects, draws = payload["effects"], payload["draws"]
         ranked = effects.loc[effects["comparison_kind"].eq("ranked_vs_random_median")]
-        pivot = draws.pivot(
-            index="resample_index", columns="comparison_id", values="effect"
-        )
+        pivot = draws.pivot(index="resample_index", columns="comparison_id", values="effect")
         records = []
         for (pool, stratum, batch_size), group in ranked.groupby(
             ["eligible_pool", "stratum", "batch_size"], sort=True
@@ -801,9 +789,7 @@ def _(np, pd, runs, rotation):
                     "n_draws": int(delta.size),
                 }
             )
-        return pd.DataFrame(records).sort_values(
-            ["pool", "stratum", "batch_size"], kind="stable"
-        )
+        return pd.DataFrame(records).sort_values(["pool", "stratum", "batch_size"], kind="stable")
 
     contrast_table = _contrast_table()
     return (contrast_table,)
@@ -887,16 +873,9 @@ def _(
                 col=col + 1,
             )
             highs = float(subset["ci_high"].max())
-            if pool == "donor_only":
-                top = max(highs * 1.15, 0.002)
-            else:
-                top = max(0.2, highs * 1.05)
-            figure.update_yaxes(
-                range=[shared_bottom, top], row=row + 1, col=col + 1
-            )
-            figure.add_hline(
-                y=0, line_dash="dash", line_color="#888888", row=row + 1, col=col + 1
-            )
+            top = max(highs * 1.15, 0.002) if pool == "donor_only" else max(0.2, highs * 1.05)
+            figure.update_yaxes(range=[shared_bottom, top], row=row + 1, col=col + 1)
+            figure.add_hline(y=0, line_dash="dash", line_color="#888888", row=row + 1, col=col + 1)
             figure.add_hrect(
                 y0=0,
                 y1=top,
@@ -979,12 +958,14 @@ def _(pd, runs):
             for source, group in scores.groupby("source", sort=True):
                 if len(group) < 10:
                     continue
-                label_rho = group[["raw_score_mean", "model_target"]].corr(
-                    method="spearman"
-                ).iloc[0, 1]
-                similarity_rho = group[
-                    ["raw_score_mean", "max_tanimoto_to_selection"]
-                ].corr(method="spearman").iloc[0, 1]
+                label_rho = (
+                    group[["raw_score_mean", "model_target"]].corr(method="spearman").iloc[0, 1]
+                )
+                similarity_rho = (
+                    group[["raw_score_mean", "max_tanimoto_to_selection"]]
+                    .corr(method="spearman")
+                    .iloc[0, 1]
+                )
                 records.append(
                     {
                         "target": target,
@@ -1003,12 +984,8 @@ def _(pd, runs):
 @app.cell
 def _(SOURCE_STYLE, TARGET_STYLE, confound_table, go, make_subplots, style_figure):
     def _confound_figure():
-        targets = [
-            target for target in TARGET_STYLE if target in set(confound_table["target"])
-        ]
-        sources = [
-            source for source in SOURCE_STYLE if source in set(confound_table["source"])
-        ]
+        targets = [target for target in TARGET_STYLE if target in set(confound_table["target"])]
+        sources = [source for source in SOURCE_STYLE if source in set(confound_table["source"])]
         figure = make_subplots(
             rows=1,
             cols=2,
@@ -1024,8 +1001,7 @@ def _(SOURCE_STYLE, TARGET_STYLE, confound_table, go, make_subplots, style_figur
                 row_z, row_text = [], []
                 for source in sources:
                     match = confound_table.loc[
-                        confound_table["target"].eq(target)
-                        & confound_table["source"].eq(source)
+                        confound_table["target"].eq(target) & confound_table["source"].eq(source)
                     ]
                     value = float(match[metric].iloc[0]) if len(match) else float("nan")
                     row_z.append(value)
@@ -1076,9 +1052,7 @@ def _(SOURCE_STYLE, TARGET_STYLE, px, rotation, runs):
             x="model_target",
             y="raw_score_mean",
             color="source_label",
-            color_discrete_map={
-                style["label"]: style["colour"] for style in SOURCE_STYLE.values()
-            },
+            color_discrete_map={style["label"]: style["colour"] for style in SOURCE_STYLE.values()},
             marginal_x="violin",
             marginal_y="violin",
             opacity=0.55,
@@ -1197,12 +1171,13 @@ def _(dedent, mo):
     mo.md(
         dedent(
             """
-            ## 4 · Did the ranking predict the refits?
-    
+            ## 4 · Does the attribution score track the observed deletion effect?
+
             Every deletion arm is a real fitted model. Plotting the mean removed influence against
-            the observed ΔRMSE closes the loop between attribution and outcomes without another fit:
-            ranked arms trace a downward relationship (removing higher-influence molecules lowers
-            the pruning gain), while random and matched controls cluster near zero.
+            the observed ΔRMSE tests whether the attribution score orders the refit outcomes
+            without another fit. The fitted trend and the printed ρ cover the ranked arms only —
+            the population the score is meant to order. Random and matched controls are drawn for
+            reference, since they are comparison policies rather than score-ordered arms.
             """
         )
     )
@@ -1248,9 +1223,7 @@ def _(TARGET_STYLE, go, np, rotation, runs, style_figure):
                     mode="markers",
                     name=family_name,
                     marker={"size": 8, "color": colour, "opacity": 0.55},
-                    customdata=subset[
-                        ["eligible_pool", "stratum", "batch_size", "direction"]
-                    ],
+                    customdata=subset[["eligible_pool", "stratum", "batch_size", "direction"]],
                     hovertemplate=(
                         "removed score = %{x:+.4f}<br>ΔRMSE = %{y:+.4f}<br>"
                         "%{customdata[0]} · %{customdata[1]} · k=%{customdata[2]} · "
@@ -1260,9 +1233,7 @@ def _(TARGET_STYLE, go, np, rotation, runs, style_figure):
             )
         ranked = merged.loc[merged["policy_family"].eq("Ranked (high + low)")]
         slope, intercept = np.polyfit(ranked["removed_score"], ranked["effect"], 1)
-        x_line = np.linspace(
-            ranked["removed_score"].min(), ranked["removed_score"].max(), 50
-        )
+        x_line = np.linspace(ranked["removed_score"].min(), ranked["removed_score"].max(), 50)
         figure.add_trace(
             go.Scatter(
                 x=x_line,
@@ -1275,10 +1246,11 @@ def _(TARGET_STYLE, go, np, rotation, runs, style_figure):
         )
         figure.add_hline(y=0, line_dash="dash", line_color="#555555")
         figure.add_vline(x=0, line_dash="dot", line_color="#BBBBBB")
-        rho = merged[["removed_score", "effect"]].corr(method="spearman").iloc[0, 1]
+        rho_ranked = ranked[["removed_score", "effect"]].corr(method="spearman").iloc[0, 1]
+        rho_all = merged[["removed_score", "effect"]].corr(method="spearman").iloc[0, 1]
         style_figure(
             figure,
-            f"Predicted vs observed: every deletion arm · "
+            f"Attribution score vs observed deletion effect · "
             f"{TARGET_STYLE[rotation.value]['label']}",
             height=540,
             xaxis_title="Mean removed BoostIn influence (positive = molecules the ranking "
@@ -1293,8 +1265,12 @@ def _(TARGET_STYLE, go, np, rotation, runs, style_figure):
             xref="paper",
             yref="paper",
             xanchor="right",
+            align="right",
             showarrow=False,
-            text=f"Spearman ρ(removed score, ΔRMSE) = {rho:+.2f}",
+            text=(
+                f"Spearman ρ over ranked arms = {rho_ranked:+.2f}<br>"
+                f"all arms for reference = {rho_all:+.2f}"
+            ),
             font={"size": 12, "color": "#444444"},
             bgcolor="rgba(255,255,255,0.85)",
         )
@@ -1317,21 +1293,22 @@ def _(dedent, mo):
 
             - **Bias** = `mean(r)`. A positive bias means the model under-predicts on average;
               a constant shift could remove it, so this is *calibration* error.
-            - **Centred RMSE** = `sqrt(mean((r − mean(r))²))`. This is the residual spread left
-              after removing that shift — the part no constant correction can fix, so it
-              reflects the learned *molecular relationship*.
+            - **Centred RMSE** = `sqrt(mean((r − mean(r))²))`. This is the error remaining after
+              removing a constant calibration shift. It still contains noise, heteroscedasticity,
+              and any non-constant assay mismatch, so read it as "error beyond a constant offset",
+              not as a pure structure–activity signal.
             - The three bars are linked exactly: **RMSE² = Bias² + Centred RMSE²**, so the first
               two decompose the third.
 
             Read each group of bars left to right. If an intervention moves mostly the bias bar,
             it behaves like a label-level calibration shift; if it moves mostly the centred bar,
-            it changed which molecules the model gets right. In these rotations the failure
-            modes differ: **Polaris** local-only is badly biased and pooling repairs the bias,
-            while high-influence removal throws that repair away; **Biogen** separates through
-            centred error instead; **ExpansionRx** sits in between. The colour scheme encodes
-            the design — blue/grey for the baselines, warm tones for high-influence removal,
-            green tones for low-influence removal, with darker shades for the native pool and
-            lighter shades for the mixed pool.
+            it changed the error structure beyond a constant offset. In these rotations the
+            failure modes differ: **Polaris** local-only is badly biased and pooling repairs the
+            bias, while high-influence removal throws that repair away; **Biogen** separates
+            through centred error instead; **ExpansionRx** sits in between. The colour scheme
+            encodes the design — blue/grey for the baselines, warm tones for high-influence
+            removal, green tones for low-influence removal, with darker shades for the native
+            pool and lighter shades for the mixed pool.
             """
         )
     )
@@ -1379,9 +1356,7 @@ def _(TARGET_STYLE, go, np, pd, rotation, runs, style_figure):
             aggregated.groupby("condition")["residual"]
             .agg(
                 bias="mean",
-                centred=lambda series: float(
-                    np.sqrt(np.mean((series - series.mean()) ** 2))
-                ),
+                centred=lambda series: float(np.sqrt(np.mean((series - series.mean()) ** 2))),
                 rmse=lambda series: float(np.sqrt(np.mean(series**2))),
             )
             .reset_index()
@@ -1428,11 +1403,13 @@ def _(dedent, mo):
         dedent(
             """
             ## 6 · Where is the chemistry?
-    
-            The score–similarity correlation is essentially zero in every rotation, so the ranking
-            is not a chemical-domain detector. The PCA map is the falsification panel: if influence
-            concentrated in coherent chemical regions, this is where it would show. Held-out
-            evaluation molecules are outlined in black.
+
+            The score–similarity correlation is essentially zero in every rotation: the ranking
+            has little association with the maximum-Tanimoto-to-selection summary used here. That
+            is all it shows — other chemical summaries could behave differently. The PCA map is a
+            descriptive view of fingerprint space, not a falsification test; the absence of
+            obvious clusters would not rule out chemical structure. Held-out evaluation molecules
+            are outlined in black.
             """
         )
     )
@@ -1470,9 +1447,7 @@ def _(
                 if molecule is None:
                     rows.append(np.zeros(2048, dtype=np.float32))
                 else:
-                    rows.append(
-                        generator.GetFingerprintAsNumPy(molecule).astype(np.float32)
-                    )
+                    rows.append(generator.GetFingerprintAsNumPy(molecule).astype(np.float32))
             return np.stack(rows)
 
         matrix = fingerprints(training["canonical_smiles"])
@@ -1482,9 +1457,9 @@ def _(
         order = np.argsort(eigenvalues)[::-1][:2]
         embedding = centred @ eigenvectors[:, order]
         variance_share = eigenvalues[order] / eigenvalues.sum() * 100
-        evaluation_embedding = (
-            fingerprints(evaluation["canonical_smiles"]) - mean
-        ) @ eigenvectors[:, order]
+        evaluation_embedding = (fingerprints(evaluation["canonical_smiles"]) - mean) @ eigenvectors[
+            :, order
+        ]
         score_values = training["raw_score_mean"].to_numpy(dtype=float)
         finite = score_values[np.isfinite(score_values)]
         limit = float(np.quantile(np.abs(finite), 0.98)) if finite.size else 1.0
@@ -1544,9 +1519,7 @@ def _(
                     "symbol": "diamond-open",
                 },
                 customdata=evaluation[["candidate_id", "original_id"]],
-                hovertemplate=(
-                    "held-out evaluation molecule = %{customdata[1]}<extra></extra>"
-                ),
+                hovertemplate=("held-out evaluation molecule = %{customdata[1]}<extra></extra>"),
             )
         )
         style_figure(
@@ -1624,9 +1597,7 @@ def _(
                     f"{len(brushed_ids)} selected"
                 ),
                 mo.ui.anywidget(
-                    MoleculeGrid(
-                        molecules=brushed_records, title="Chemical-space selection"
-                    )
+                    MoleculeGrid(molecules=brushed_records, title="Chemical-space selection")
                 ),
             ]
         )
@@ -1723,7 +1694,13 @@ def _(
         scaffold_selector = scaffold_control
     else:
         scaffold_control = mo.ui.dropdown(
-            options=dict(zip(scaffold_table["label"], scaffold_table["scaffold"])),
+            options=dict(
+                zip(
+                    scaffold_table["label"],
+                    scaffold_table["scaffold"],
+                    strict=True,
+                )
+            ),
             value=str(scaffold_default_row["label"]),
             label="Scaffold selector",
             full_width=True,
@@ -1748,15 +1725,12 @@ def _(molecule_records, rotation, runs, scaffold_control, scaffold_of, scaffold_
         training = manifest.loc[manifest["role"].eq("full_training")].copy()
         training["scaffold"] = training["canonical_smiles"].map(scaffold_of)
         member_ids = (
-            training.loc[training["scaffold"].eq(selected), "candidate_id"]
-            .astype(str)
-            .tolist()
+            training.loc[training["scaffold"].eq(selected), "candidate_id"].astype(str).tolist()
         )
         scores = payload["scores"]
-        score_order = (
-            scores.drop_duplicates("candidate_id")
-            .set_index("candidate_id")["raw_score_mean"]
-        )
+        score_order = scores.drop_duplicates("candidate_id").set_index("candidate_id")[
+            "raw_score_mean"
+        ]
         member_ids = sorted(
             member_ids,
             key=lambda candidate: score_order.get(candidate, float("-inf")),
@@ -1838,12 +1812,8 @@ def _(mo, pd, rotation, runs, scaffold_grid):
                 kind="info",
             )
         payload = runs[rotation.value]
-        manifest = payload["manifest"].drop_duplicates("candidate_id").set_index(
-            "candidate_id"
-        )
-        scores = payload["scores"].drop_duplicates("candidate_id").set_index(
-            "candidate_id"
-        )
+        manifest = payload["manifest"].drop_duplicates("candidate_id").set_index("candidate_id")
+        scores = payload["scores"].drop_duplicates("candidate_id").set_index("candidate_id")
         rows = []
         for candidate in selected:
             if candidate not in manifest.index:
@@ -1856,9 +1826,7 @@ def _(mo, pd, rotation, runs, scaffold_grid):
                     "source": str(row.get("source", "")),
                     "role": str(row.get("role", "")),
                     "label": row.get("model_target"),
-                    "influence": None
-                    if score_row is None
-                    else score_row.get("raw_score_mean"),
+                    "influence": None if score_row is None else score_row.get("raw_score_mean"),
                     "max tanimoto": None
                     if score_row is None
                     else score_row.get("max_tanimoto_to_selection"),
@@ -1884,15 +1852,17 @@ def _(mo):
             mo.md(
                 """
                 - **Pooling is not one decision.** Across the three rotations the point estimate
-                  flips sign; none of the intervals excludes zero, so the practical reading is
-                  that a pooled donor corpus needs a per-target verdict, not a global one.
-                - **The influence direction is real.** Removing high-influence native molecules
-                  hurts more than removing low-influence ones in every rotation, grows with the
-                  deletion size, and survives label/source matching.
-                - **The ranking is a label ranker, not a chemist.** Score–label Spearman is
-                  +0.85 for ExpansionRx, +0.87 for Polaris, and −0.52 for Biogen; score–similarity
-                  is ~0 everywhere. The stratified control is the only fair test, and the
-                  direction passes it.
+                  flips sign; no pooling interval excludes zero, so the practical reading is that
+                  a pooled donor corpus needs a per-target verdict, not a global one.
+                - **The native deletion direction is consistent.** The high-vs-low contrast
+                  interval excludes zero in all three rotations and grows with the deletion size.
+                  Under the coarse source + label-quantile control the interval excludes zero only
+                  in ExpansionRx; Biogen and Polaris are inconclusive at their evaluation-set
+                  sizes, and those controls are not continuous-label matches.
+                - **The ranking is dominated by label level.** Score–label Spearman is +0.85 for
+                  ExpansionRx, +0.87 for Polaris, and −0.52 for Biogen; score–similarity with the
+                  maximum-Tanimoto summary is ~0 everywhere. The stratified control is the only
+                  comparison that tests the ranking beyond label extremity, and it is coarse.
                 - **Donors are not interchangeable.** Polaris donors invert the direction for
                   both other targets: the ranking flags molecules that actively hurt.
                 - **Magnitudes scale with the surgical budget.** Donor effects are a few percent
@@ -1924,10 +1894,18 @@ def _(mo):
                         "construction, so every number here is a held-out measurement."
                     ),
                     "Scope and honesty": mo.md(
-                        "The ExpansionRx test partition has informed prior exploration, so results "
-                        "are temporally ordered exploratory analyses, not prospective confirmation. "
-                        "Dry runs are excluded. No addition-utility calibration is used: direction "
-                        "is validated only through conditional deletion."
+                        "The ExpansionRx test partition has informed prior exploration, so "
+                        "results are temporally ordered exploratory analyses, not prospective "
+                        "confirmation. Dry runs are excluded. No addition-utility calibration "
+                        "is used: direction is assessed only through conditional deletion."
+                    ),
+                    "What the matched control does and does not show": mo.md(
+                        "The stratified controls preserve source composition and within-source "
+                        "label quantile bins; they are not continuous-label matches, and the "
+                        "removed-label panel shows the ranked and matched arms can still sit at "
+                        "different label levels. The supported statement is that the direction "
+                        "is not fully explained by this coarse stratification, not that label "
+                        "level has been neutralised."
                     ),
                 }
             ),

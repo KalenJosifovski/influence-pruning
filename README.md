@@ -25,7 +25,7 @@ configuration. Stratified controls preserve source composition and within-source
 quantile bins; they are not exact continuous-label matches, so their achieved label
 distributions can differ from the reference batch (reported as Wasserstein diagnostics).
 Attribution never sees \(E\); evaluation never influences scoring or arm construction. Sign
-orientation is validated only through conditional deletion: the full pooled model is scored
+orientation is assessed only through conditional deletion: the full pooled model is scored
 against \(S\), high-score and low-score batches are deleted from that same pool, and both
 pruned models are compared on \(E\). No addition-utility calibration is used or reported.
 
