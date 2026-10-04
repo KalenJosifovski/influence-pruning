@@ -163,6 +163,19 @@ Nothing is too large for molab: the built zip is ~53 MB, comfortably within the 
 storage panel, and the notebook recomputes the draw cache in about 40 s if it is omitted.
 The bundle builder skips dry-run and stale-schema runs automatically.
 
+For manual uploads, build the same minimal set unzipped:
+
+```bash
+pixi run -e dev molab-upload     # writes dist/molab_upload/
+```
+
+Upload `04_pooling_surgery.py` as the notebook, then the `src/`, `results/`, and `analysis/`
+folders, preserving the paths exactly (create the folders first if the uploader accepts files
+only). `results/boostin_pruning/<run>/` must keep all sixteen verified artifacts — that is the
+minimum `verify_run` accepts; `analysis/effects_recomputed/<run>/bootstrap_draws.parquet` may
+contain only the ranked-comparison draws, which the builder already trims. With these files in
+place the notebook never downloads anything.
+
 ### Automating updates with GitHub
 
 molab has no upload API; its supported automation is GitHub mirroring. Once the repository

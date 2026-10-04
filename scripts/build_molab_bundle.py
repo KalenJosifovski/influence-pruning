@@ -1,16 +1,21 @@
-"""Build the self-extracting molab upload bundle.
+"""Build the molab deployment artifacts.
 
-The bundle contains everything ``notebooks/04_pooling_surgery.py`` needs to run outside the
-repository checkout: the notebook itself, the ``influence_pruning`` package, the complete
-real-run artifact directories that ``verify_run`` checks, and the corrected-effects cache
-with ranked-comparison resample draws only. ``dist/molab_bundle.zip`` can be uploaded to a
-molab notebook's storage panel; the notebook extracts it automatically on first run.
+Two layouts are produced from the same minimal file set:
 
-Run with ``pixi run -e dev molab-bundle``.
+* ``--layout zip``    -> ``dist/molab_bundle.zip``, a self-extracting upload bundle;
+* ``--layout upload`` -> ``dist/molab_upload/``, the same tree unzipped for manual upload
+  through molab's Files panel.
+
+The set is minimal for an unchanged notebook: ``verify_run`` requires all sixteen artifacts
+per run, so nothing inside ``results/boostin_pruning/<run>/`` can be dropped. The corrected
+effects carry only ranked-comparison resample draws.
+
+Run with ``pixi run -e dev molab-bundle`` or ``pixi run -e dev molab-upload``.
 """
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import sys
 import zipfile
@@ -25,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DIST = REPO_ROOT / "dist"
 BUNDLE = DIST / "molab_bundle"
 ARCHIVE = DIST / "molab_bundle.zip"
+UPLOAD_DIR = DIST / "molab_upload"
 NOTEBOOK = REPO_ROOT / "notebooks" / "04_pooling_surgery.py"
 PACKAGE = REPO_ROOT / "src" / "influence_pruning"
 RUN_ROOT = REPO_ROOT / "results" / "boostin_pruning"
@@ -32,23 +38,35 @@ EFFECTS_ROOT = REPO_ROOT / "analysis" / "effects_recomputed"
 RANKED_KINDS = ("ranked_vs_random_median", "ranked_vs_matched_median")
 
 INSTRUCTIONS = """\
-MoleculeGrid / Pooling Under the Knife: self-extracting molab bundle
-====================================================================
+MoleculeGrid / Pooling Under the Knife: molab deployment files
+==============================================================
 
-1. On molab, create a new notebook and paste or upload
-   `04_pooling_surgery.py`.
-2. Open the Files panel (folder icon in the sidebar) and upload
-   `molab_bundle.zip`. The notebook extracts it into the session on first
-   run; no manual unzipping is needed.
-3. Install `anywidget` from the package manager panel if the notebook asks
-   (molab also installs packages on first import).
-4. Run the notebook. Everything else (the `influence_pruning` package,
-   run artifacts, corrected effects) is inside the bundle.
+Route A, self-extracting zip
+  1. On molab, create a new notebook from 04_pooling_surgery.py.
+  2. Upload molab_bundle.zip through the Files panel. The notebook extracts it on first run.
 
-Bundle contents:
+Route B, manual tree (this folder)
+  1. On molab, create a new notebook from 04_pooling_surgery.py.
+  2. Upload the folders src/, results/, and analysis/ through the Files panel, preserving
+     the paths exactly. If the panel cannot upload folders, create the folders first and
+     upload the files into them.
+  3. Run the notebook. It finds the package and artifacts relative to the notebook.
+
+Either route needs `anywidget` (molab installs it on first import).
+
+Contents:
   src/influence_pruning/           local package (including molgrid.py)
-  results/boostin_pruning/<run>/   complete verified run directories
-  analysis/effects_recomputed/     corrected effects + ranked draws
+  results/boostin_pruning/<run>/   complete verified run directories (16 files each)
+  analysis/effects_recomputed/     corrected effects + ranked-comparison draws
+"""
+
+UPLOAD_HEADER = """\
+Manual molab upload tree
+========================
+Upload everything below into the molab notebook's file tree, preserving the
+paths exactly as listed. The notebook loads them relative to its own directory.
+`04_pooling_surgery.py` is the notebook to create/upload; the three folders are
+its runtime data. Nothing else is required.
 """
 
 
@@ -71,27 +89,25 @@ def real_runs() -> list[Path]:
     return runs
 
 
-def build() -> Path:
-    if BUNDLE.exists():
-        shutil.rmtree(BUNDLE)
-    (BUNDLE / "src").mkdir(parents=True)
-    # The notebook itself is never bundled: molab owns the notebook file, and extraction
-    # must not overwrite the copy a user may have edited in a molab session.
+def stage(destination: Path) -> None:
+    """Populate a deployment directory with the minimal package and artifact set."""
+    if destination.exists():
+        shutil.rmtree(destination)
+    (destination / "src").mkdir(parents=True)
     shutil.copytree(
         PACKAGE,
-        BUNDLE / "src" / PACKAGE.name,
+        destination / "src" / PACKAGE.name,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    runs = real_runs()
-    for directory in runs:
-        shutil.copytree(directory, BUNDLE / "results" / "boostin_pruning" / directory.name)
+    for directory in real_runs():
+        shutil.copytree(directory, destination / "results" / "boostin_pruning" / directory.name)
         effects_path = EFFECTS_ROOT / directory.name / "paired_effects.parquet"
         draws_path = EFFECTS_ROOT / directory.name / "bootstrap_draws.parquet"
         if not effects_path.is_file() or not draws_path.is_file():
             raise SystemExit(
                 f"missing corrected effects for {directory.name}; run notebook 04 first"
             )
-        target = BUNDLE / "analysis" / "effects_recomputed" / directory.name
+        target = destination / "analysis" / "effects_recomputed" / directory.name
         target.mkdir(parents=True)
         shutil.copy2(effects_path, target / "paired_effects.parquet")
         effects = pd.read_parquet(effects_path)
@@ -100,7 +116,12 @@ def build() -> Path:
         draws.loc[draws["comparison_id"].isin(ranked)].to_parquet(
             target / "bootstrap_draws.parquet"
         )
-    (BUNDLE / "MOLAB_UPLOAD.txt").write_text(INSTRUCTIONS)
+    (destination / "MOLAB_UPLOAD.txt").write_text(INSTRUCTIONS)
+
+
+def build_zip() -> Path:
+    """Build the self-extracting archive; the notebook is deliberately not included."""
+    stage(BUNDLE)
     ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(ARCHIVE, "w", zipfile.ZIP_DEFLATED) as handle:
         for path in sorted(BUNDLE.rglob("*")):
@@ -109,12 +130,38 @@ def build() -> Path:
     return ARCHIVE
 
 
+def build_upload() -> Path:
+    """Build the unzipped manual-upload tree, notebook included for convenience."""
+    stage(UPLOAD_DIR)
+    shutil.copy2(NOTEBOOK, UPLOAD_DIR / NOTEBOOK.name)
+    lines = [UPLOAD_HEADER]
+    for path in sorted(UPLOAD_DIR.rglob("*")):
+        if path.is_file():
+            relative = path.relative_to(UPLOAD_DIR)
+            lines.append(f"  {relative}  ({path.stat().st_size / 1e6:.2f} MB)")
+    (UPLOAD_DIR / "UPLOAD_TREE.txt").write_text("\n".join(lines) + "\n")
+    return UPLOAD_DIR
+
+
+def total_size(folder: Path) -> float:
+    return sum(path.stat().st_size for path in folder.rglob("*") if path.is_file()) / 1e6
+
+
 def main() -> None:
-    archive = build()
-    print(f"notebook:  {NOTEBOOK.relative_to(REPO_ROOT)}")
-    print(f"runs:      {', '.join(directory.name for directory in real_runs())}")
-    print(f"archive:   {archive.relative_to(REPO_ROOT)} ({archive.stat().st_size / 1e6:.1f} MB)")
-    print("upload the notebook and dist/molab_bundle.zip to the molab notebook storage panel")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--layout", choices=("zip", "upload", "both"), default="both", help="what to build"
+    )
+    args = parser.parse_args()
+    if args.layout in ("zip", "both"):
+        archive = build_zip()
+        print(f"zip:    {archive.relative_to(REPO_ROOT)} ({archive.stat().st_size / 1e6:.1f} MB)")
+    if args.layout in ("upload", "both"):
+        folder = build_upload()
+        print(
+            f"upload: {folder.relative_to(REPO_ROOT)}/ ({total_size(folder):.1f} MB, "
+            f"notebook + src/ + results/ + analysis/)"
+        )
 
 
 if __name__ == "__main__":
