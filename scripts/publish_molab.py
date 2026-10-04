@@ -121,9 +121,9 @@ def main() -> None:
     changed = set_bundle_url(bundle_url)
 
     sys.path.insert(0, str(pathlib.Path(__file__).parent))
-    from build_molab_bundle import build
+    from build_molab_bundle import build_zip
 
-    archive = build()
+    archive = build_zip()
     print(f"built {archive.relative_to(REPO_ROOT)}")
 
     if args.skip_push:
