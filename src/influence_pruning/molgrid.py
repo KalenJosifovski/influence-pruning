@@ -32,6 +32,7 @@ except ImportError:  # pragma: no cover - the widget is optional outside the dev
 __all__ = [
     "MoleculeGrid",
     "ScaffoldBars",
+    "Speaker",
     "draw_svg",
     "molecule_records",
     "scaffold_of",
@@ -324,6 +325,150 @@ _BARS_CSS = """
 .scaffoldbars-fill.negative { background: #E45756; }
 """
 
+_SPEAKER_ESM = """
+function render({ model, el }) {
+  el.classList.add("speaker");
+  const supported = "speechSynthesis" in window;
+
+  const controls = document.createElement("div");
+  controls.className = "speaker-controls";
+  const button = document.createElement("button");
+  button.className = "speaker-button";
+  const voice = document.createElement("select");
+  voice.className = "speaker-voice";
+  voice.setAttribute("aria-label", "Voice");
+  const rate = document.createElement("input");
+  rate.className = "speaker-rate";
+  rate.type = "range";
+  rate.min = "0.5";
+  rate.max = "1.8";
+  rate.step = "0.1";
+  rate.value = "1";
+  rate.setAttribute("aria-label", "Speed");
+  const rateLabel = document.createElement("span");
+  rateLabel.className = "speaker-rate-label";
+  const status = document.createElement("div");
+  status.className = "speaker-status";
+  controls.append(button, voice, rate, rateLabel);
+  el.append(controls, status);
+
+  let phase = "idle";
+
+  function updateButton() {
+    if (!supported) {
+      button.textContent = model.get("label") || "Listen";
+      return;
+    }
+    button.textContent =
+      phase === "speaking"
+        ? "Pause"
+        : phase === "paused"
+          ? "Resume"
+          : model.get("label") || "Listen";
+  }
+
+  function setPhase(next) {
+    phase = next;
+    updateButton();
+  }
+
+  function populateVoices() {
+    if (!supported) {
+      return;
+    }
+    const voices = window.speechSynthesis.getVoices() || [];
+    const previous = voice.value;
+    voice.innerHTML = "";
+    for (const entry of voices) {
+      const option = document.createElement("option");
+      option.value = entry.name;
+      option.textContent = `${entry.name} · ${entry.lang}`;
+      voice.append(option);
+    }
+    if (previous) {
+      voice.value = previous;
+    }
+    voice.disabled = voices.length === 0;
+  }
+
+  function speak() {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(model.get("text") || "");
+    const voices = window.speechSynthesis.getVoices() || [];
+    const chosen = voices.find((entry) => entry.name === voice.value);
+    if (chosen) {
+      utterance.voice = chosen;
+    }
+    utterance.rate = Number(rate.value) || 1;
+    utterance.onend = () => setPhase("idle");
+    utterance.onerror = () => setPhase("idle");
+    window.speechSynthesis.speak(utterance);
+    setPhase("speaking");
+  }
+
+  button.addEventListener("click", () => {
+    if (!supported) {
+      return;
+    }
+    if (phase === "idle") {
+      speak();
+    } else if (phase === "speaking") {
+      window.speechSynthesis.pause();
+      setPhase("paused");
+    } else {
+      window.speechSynthesis.resume();
+      setPhase("speaking");
+    }
+  });
+
+  rate.addEventListener("input", () => {
+    rateLabel.textContent = `${Number(rate.value).toFixed(1)}×`;
+  });
+  rateLabel.textContent = "1.0×";
+
+  if (!supported) {
+    button.disabled = true;
+    voice.disabled = true;
+    rate.disabled = true;
+    status.textContent = "This browser does not expose the Web Speech API.";
+  } else {
+    status.textContent = "Browser speech synthesis · voice and speed stay on your machine";
+    populateVoices();
+    window.speechSynthesis.onvoiceschanged = populateVoices;
+  }
+  updateButton();
+
+  model.on("change:label", updateButton);
+  model.on("change:text", () => {
+    if (phase !== "idle") {
+      window.speechSynthesis.cancel();
+      setPhase("idle");
+    }
+  });
+}
+
+export default { render };
+"""
+
+_SPEAKER_CSS = """
+.speaker { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+.speaker-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.speaker-button {
+  padding: 8px 14px; border-radius: 8px; border: 1px solid #6A3D9A;
+  background: #6A3D9A; color: white; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.speaker-button:hover { background: #5a3285; }
+.speaker-button:disabled { background: #cccccc; border-color: #cccccc; cursor: not-allowed; }
+.speaker-voice {
+  max-width: 240px; padding: 6px 8px; border: 1px solid #dcdcdc;
+  border-radius: 6px; background: white; font-size: 12px;
+}
+.speaker-rate { width: 110px; }
+.speaker-rate-label { font-size: 12px; color: #555555; min-width: 34px; }
+.speaker-status { font-size: 11.5px; color: #777777; margin-top: 6px; }
+"""
+
 _PLACEHOLDER_SVG = (
     "<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' "
     "viewBox='0 0 {width} {height}'>"
@@ -366,9 +511,26 @@ if anywidget is not None:
         selected = traitlets.Unicode("").tag(sync=True)
         title = traitlets.Unicode("Scaffold influence").tag(sync=True)
 
+    class Speaker(anywidget.AnyWidget):  # type: ignore[misc]
+        """Browser text-to-speech control for a passage of the notebook.
+
+        Uses the Web Speech API, so no API key, audio asset, or server-side model is
+        involved; the selected voice and speed stay on the viewer's machine.
+
+        :param text: passage to read aloud.
+        :param label: idle button label, for example "Hear the verdict".
+        """
+
+        _esm = _SPEAKER_ESM
+        _css = _SPEAKER_CSS
+
+        text = traitlets.Unicode("").tag(sync=True)
+        label = traitlets.Unicode("Listen").tag(sync=True)
+
 else:  # pragma: no cover - exercised only when anywidget is absent
     MoleculeGrid = None  # type: ignore[assignment,misc]
     ScaffoldBars = None  # type: ignore[assignment,misc]
+    Speaker = None  # type: ignore[assignment,misc]
 
 
 def scaffold_of(smiles: str) -> str:

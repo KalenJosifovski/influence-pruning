@@ -129,6 +129,7 @@ def _():
     from influence_pruning.molgrid import (
         MoleculeGrid,
         ScaffoldBars,
+        Speaker,
         molecule_records,
         scaffold_of,
         scaffold_summary,
@@ -139,6 +140,7 @@ def _():
     return (
         MoleculeGrid,
         ScaffoldBars,
+        Speaker,
         molgrid_available,
         molecule_records,
         scaffold_of,
@@ -1879,10 +1881,28 @@ def _(mo, pd, rotation, runs, scaffold_grid):
 
 
 @app.cell
-def _(mo):
+def _(Speaker, mo, molgrid_available):
+    spoken_verdict = (
+        "Pooling under the knife. Across three target rotations the pooling point estimate "
+        "changes sign, and every interval includes zero. The deletion direction is consistent: "
+        "on native chemistry, removing high influence molecules did worse than removing low "
+        "influence ones in all three rotations. The ranking is dominated by measured label level "
+        "rather than the chemical similarity summary used in this notebook."
+    )
+    verdict_speaker = (
+        mo.ui.anywidget(Speaker(text=spoken_verdict, label="Hear the verdict"))
+        if molgrid_available
+        else mo.md("")
+    )
+    return (verdict_speaker,)
+
+
+@app.cell
+def _(mo, verdict_speaker):
     mo.vstack(
         [
             mo.md("## 7 · The bottom line"),
+            verdict_speaker,
             mo.md(
                 """
                 - **Pooling is not one decision.** Across the three rotations the point estimate

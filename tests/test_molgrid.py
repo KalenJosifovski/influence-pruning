@@ -5,6 +5,7 @@ import pandas as pd
 from influence_pruning.molgrid import (
     MoleculeGrid,
     ScaffoldBars,
+    Speaker,
     draw_svg,
     molecule_records,
     scaffold_atoms,
@@ -109,6 +110,13 @@ def test_scaffold_bars_is_an_anywidget_with_synced_traits() -> None:
     bars = ScaffoldBars(scaffolds=[], selected="c1ccccc1", title="Test")
     assert set(bars.traits(sync=True)) >= {"scaffolds", "selected", "title"}
     assert bars.selected == "c1ccccc1"
+
+
+def test_speaker_is_an_anywidget_with_synced_traits() -> None:
+    speaker = Speaker(text="Hello", label="Listen")
+    assert set(speaker.traits(sync=True)) >= {"text", "label"}
+    assert speaker.text == "Hello"
+    assert speaker.label == "Listen"
 
 
 def test_selection_ids_resolves_every_marimo_payload_shape() -> None:

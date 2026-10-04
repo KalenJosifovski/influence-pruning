@@ -129,7 +129,8 @@ compares pooling against local-only training across the three rotations, validat
 deletion direction with paired resample draws, explains the label confound, and closes with
 calibration and chemical-space panels. It ships a custom anywidget molecule explorer
 (`src/influence_pruning/molgrid.py`) with search, sorting, click selection, scaffold
-highlighting, and box/lasso brushing from the PCA map. The widget degrades to a static RDKit
+highlighting, and box/lasso brushing from the PCA map, plus a browser text-to-speech button
+that narrates the verdict through the Web Speech API. The widget degrades to a static RDKit
 grid when `anywidget` is unavailable.
 
 ### Running on molab
