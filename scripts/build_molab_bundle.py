@@ -75,7 +75,8 @@ def build() -> Path:
     if BUNDLE.exists():
         shutil.rmtree(BUNDLE)
     (BUNDLE / "src").mkdir(parents=True)
-    shutil.copy2(NOTEBOOK, BUNDLE / NOTEBOOK.name)
+    # The notebook itself is never bundled: molab owns the notebook file, and extraction
+    # must not overwrite the copy a user may have edited in a molab session.
     shutil.copytree(
         PACKAGE,
         BUNDLE / "src" / PACKAGE.name,

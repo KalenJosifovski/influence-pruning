@@ -45,16 +45,25 @@ def _():
         _roots.append(_notebook_root)
 
     # molab bootstrap: restore the self-extracting upload bundle when running outside the
-    # repository checkout (no-op locally, where the zip is absent). `publish_molab.py` fills
-    # in the release URL, so a synced or forked molab notebook can fetch the data itself.
+    # repository checkout (no-op locally, where the package is on the path). `publish_molab.py`
+    # fills in the release URL, and the download is persistently cached so only the first molab
+    # session pays for the transfer.
     MOLAB_BUNDLE_URL = "https://github.com/KalenJosifovski/influence-pruning/releases/latest/download/molab_bundle.zip"
-    _has_local_package = any((_root / "src" / "influence_pruning").is_dir() for _root in _roots)
+    _has_local_package = any(
+        (_root / "influence_pruning").is_dir() or (_root / "src" / "influence_pruning").is_dir()
+        for _root in _roots
+    )
     _target_zip = _roots[0] / "molab_bundle.zip"
     if MOLAB_BUNDLE_URL and not _has_local_package and not _target_zip.is_file():
         import urllib.request
 
+        @mo.persistent_cache
+        def _fetch_bundle(url: str) -> bytes:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                return response.read()
+
         with contextlib.suppress(OSError):
-            urllib.request.urlretrieve(MOLAB_BUNDLE_URL, _target_zip)
+            _target_zip.write_bytes(_fetch_bundle(MOLAB_BUNDLE_URL))
 
     for _root in _roots:
         _bundle_zip = _root / "molab_bundle.zip"
@@ -71,6 +80,17 @@ def _():
     for _root in _roots:
         _add_to_path(_root)
         _add_to_path(_root / "src")
+
+    _package_found = _has_local_package or any(
+        (_root / "influence_pruning").is_dir() or (_root / "src" / "influence_pruning").is_dir()
+        for _root in _roots
+    )
+    if not _package_found:
+        raise ModuleNotFoundError(
+            "influence_pruning is not importable. On molab, upload molab_bundle.zip through "
+            "the Files panel (persistent), or confirm that MOLAB_BUNDLE_URL is reachable from "
+            "this session."
+        )
 
     import numpy as np
     import pandas as pd

@@ -21,7 +21,10 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 NOTEBOOK = REPO_ROOT / "notebooks" / "04_pooling_surgery.py"
-URL_LINE = re.compile(r'^(\s*)MOLAB_BUNDLE_URL = ".*"$', re.MULTILINE)
+URL_LINE = re.compile(
+    r'^([ \t]*)MOLAB_BUNDLE_URL = (?:\([^)]*\)|"[^"]*")',
+    re.MULTILINE | re.DOTALL,
+)
 RELEASE_TAG = "molab-bundle"
 ASSET_NAME = "molab_bundle.zip"
 DRY_RUN = False
@@ -51,10 +54,13 @@ def probe(command: list[str]) -> int:
 
 def set_bundle_url(url: str) -> bool:
     """Rewrite the notebook's bundle URL placeholder; return True when it changed."""
+
+    def replacement(match: re.Match) -> str:
+        indent = match.group(1)
+        return f'{indent}MOLAB_BUNDLE_URL = (\n{indent}    "{url}"\n{indent})'
+
     source = NOTEBOOK.read_text()
-    updated, replacements = URL_LINE.subn(
-        lambda match: f'{match.group(1)}MOLAB_BUNDLE_URL = "{url}"', source, count=1
-    )
+    updated, replacements = URL_LINE.subn(replacement, source, count=1)
     if replacements != 1:
         raise SystemExit("could not find the MOLAB_BUNDLE_URL placeholder in the notebook")
     if updated == source:
