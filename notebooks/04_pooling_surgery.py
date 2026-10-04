@@ -1,9 +1,26 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "anywidget>=0.11",
+#   "marimo>=0.25",
+#   "numpy",
+#   "pandas",
+#   "plotly>=7",
+#   "pyarrow",
+#   "pyyaml",
+#   "rdkit>=2024.9",
+# ]
+# ///
 """Pooling Under the Knife: a cross-target story of conditional influence pruning.
 
 Read-only analysis of completed BoostIn deletion runs. The notebook recomputes paired
 effect intervals from frozen per-molecule predictions to repair a row-alignment defect in
 the persisted effects tables; it never fits a model, recomputes attribution, or changes a
 raw artifact.
+
+The interactive molecule grids are rendered by the custom ``MoleculeGrid`` anywidget in
+``influence_pruning.molgrid``; the notebook degrades to a static fallback if anywidget is
+unavailable.
 """
 
 import marimo
@@ -26,7 +43,6 @@ def _():
     from plotly.subplots import make_subplots
     from rdkit import Chem
     from rdkit.Chem import Draw, rdFingerprintGenerator
-    from rdkit.Chem.Scaffolds import MurckoScaffold
 
     from influence_pruning.artifacts import verify_run
     from influence_pruning.errors import ArtifactError
@@ -35,7 +51,6 @@ def _():
         ArtifactError,
         Chem,
         Draw,
-        MurckoScaffold,
         dedent,
         go,
         json,
@@ -48,6 +63,19 @@ def _():
         rdFingerprintGenerator,
         verify_run,
     )
+
+
+@app.cell
+def _():
+    from influence_pruning.molgrid import (
+        MoleculeGrid,
+        molecule_records,
+        scaffold_of,
+        scaffold_summary,
+    )
+
+    molgrid_available = MoleculeGrid is not None
+    return MoleculeGrid, molgrid_available, molecule_records, scaffold_of, scaffold_summary
 
 
 @app.cell
@@ -1410,8 +1438,11 @@ def _(
         finite = score_values[np.isfinite(score_values)]
         limit = float(np.quantile(np.abs(finite), 0.98)) if finite.size else 1.0
         figure = go.Figure()
+        selection_lookup = {}
         for source, style in SOURCE_STYLE.items():
             subset = training["source"].eq(source).to_numpy()
+            source_rows = training.loc[subset]
+            selection_lookup[len(figure.data)] = source_rows["candidate_id"].astype(str).tolist()
             figure.add_trace(
                 go.Scattergl(
                     x=embedding[subset, 0],
@@ -1433,17 +1464,22 @@ def _(
                         },
                         "showscale": source == "expansionrx",
                     },
-                    customdata=training.loc[
-                        subset,
-                        ["model_target", "max_tanimoto_to_selection", "raw_score_mean"],
+                    customdata=source_rows[
+                        [
+                            "candidate_id",
+                            "model_target",
+                            "max_tanimoto_to_selection",
+                            "raw_score_mean",
+                        ]
                     ],
                     hovertemplate=(
-                        "source = " + style["label"] + "<br>label = %{customdata[0]:.2f}<br>"
-                        "score = %{customdata[2]:+.4f}<br>max Tanimoto to selection = "
-                        "%{customdata[1]:.3f}<extra></extra>"
+                        "source = " + style["label"] + "<br>label = %{customdata[1]:.2f}<br>"
+                        "score = %{customdata[3]:+.4f}<br>max Tanimoto to selection = "
+                        "%{customdata[2]:.3f}<extra></extra>"
                     ),
                 )
             )
+        selection_lookup[len(figure.data)] = evaluation["candidate_id"].astype(str).tolist()
         figure.add_trace(
             go.Scattergl(
                 x=evaluation_embedding[:, 0],
@@ -1456,7 +1492,10 @@ def _(
                     "line": {"width": 1.2, "color": "#333333"},
                     "symbol": "diamond-open",
                 },
-                hovertemplate="held-out evaluation molecule<extra></extra>",
+                customdata=evaluation[["candidate_id", "original_id"]],
+                hovertemplate=(
+                    "held-out evaluation molecule = %{customdata[1]}<extra></extra>"
+                ),
             )
         )
         style_figure(
@@ -1477,15 +1516,88 @@ def _(
             xanchor="right",
             showarrow=False,
             text="Morgan r=2, 2048 bits · training points coloured by influence · "
-            "held-out evaluation outlined",
+            "held-out evaluation outlined · box-select or lasso to inspect molecules",
             font={"size": 11, "color": "#666666"},
             bgcolor="rgba(255,255,255,0.85)",
         )
-        return figure
+        return figure, selection_lookup
 
-    chem_figure = _chem_figure()
-    chem_figure
-    return (chem_figure,)
+    chem_figure, chem_selection_lookup = _chem_figure()
+    return (chem_figure, chem_selection_lookup)
+
+
+@app.cell
+def _(chem_figure, mo):
+    pca_plot = mo.ui.plotly(chem_figure)
+    pca_plot
+    return (pca_plot,)
+
+
+@app.cell
+def _(
+    MoleculeGrid,
+    chem_selection_lookup,
+    mo,
+    molgrid_available,
+    molecule_records,
+    pca_plot,
+    rotation,
+    runs,
+):
+    def _brushed_ids():
+        value = pca_plot.value if isinstance(pca_plot.value, dict) else {}
+        found = []
+        for point in value.get("points") or []:
+            customdata = point.get("customdata")
+            if isinstance(customdata, (list, tuple)) and customdata:
+                found.append(str(customdata[0]))
+            elif isinstance(customdata, dict) and "candidate_id" in customdata:
+                found.append(str(customdata["candidate_id"]))
+            elif point.get("curveNumber") is not None and (
+                point.get("pointNumber") is not None
+                or point.get("pointIndex") is not None
+            ):
+                trace_ids = chem_selection_lookup.get(int(point["curveNumber"]), [])
+                index = int(point.get("pointNumber", point.get("pointIndex")))
+                if 0 <= index < len(trace_ids):
+                    found.append(str(trace_ids[index]))
+        return list(dict.fromkeys(found))
+
+    brushed_ids = _brushed_ids()
+    payload = runs[rotation.value]
+    brushed_records = (
+        molecule_records(payload["manifest"], payload["scores"], brushed_ids, cap=200)
+        if brushed_ids
+        else []
+    )
+    if not molgrid_available:
+        brushed_view = mo.callout(
+            mo.md("Install `anywidget` to inspect brushed molecules interactively."),
+            kind="warn",
+        )
+    elif not brushed_records:
+        brushed_view = mo.callout(
+            mo.md(
+                "**Box-select or lasso points on the map** to load those molecules below."
+            ),
+            kind="info",
+        )
+    else:
+        brushed_view = mo.vstack(
+            [
+                mo.md(
+                    f"**Brushed molecules** · showing {len(brushed_records)} of "
+                    f"{len(brushed_ids)} selected"
+                ),
+                mo.ui.anywidget(
+                    MoleculeGrid(
+                        molecules=brushed_records, title="Chemical-space selection"
+                    )
+                ),
+            ]
+        )
+    brushed_view
+    return
 
 
 @app.cell
@@ -1494,11 +1606,11 @@ def _(dedent, mo):
         dedent(
             """
             ### Scaffold view
-    
+
             Aggregating at the Bemis–Murcko level asks whether the signal is chemically
-            interpretable. The top helpful and harmful scaffolds (at least five molecules each)
-            are shown first; the molecule grid shows the most influential examples of the strongest
-            helpful scaffold.
+            interpretable. Click a bar — or use the fallback selector — to load that scaffold's
+            molecules into the interactive grid. The grid supports search, sorting, and click
+            selection; highlighted atoms mark the scaffold.
             """
         )
     )
@@ -1506,50 +1618,30 @@ def _(dedent, mo):
 
 
 @app.cell
-def _(Chem, Draw, MurckoScaffold, TARGET_STYLE, go, pd, rotation, runs, style_figure):
-    def _scaffold_panel():
+def _(TARGET_STYLE, go, rotation, runs, scaffold_summary, style_figure):
+    def _scaffold_view():
         payload = runs[rotation.value]
-        manifest = payload["manifest"]
-        scores = payload["scores"]
-        training = manifest.loc[manifest["role"].eq("full_training")].merge(
-            scores[["candidate_id", "raw_score_mean"]], on="candidate_id", how="left"
-        )
-
-        def scaffold_of(smiles):
-            try:
-                return MurckoScaffold.MurckoScaffoldSmiles(smiles=str(smiles))
-            except Exception:
-                return ""
-
-        training = training.assign(scaffold=training["canonical_smiles"].map(scaffold_of))
-        grouped = (
-            training.loc[training["scaffold"].ne("")]
-            .groupby("scaffold")
-            .agg(n=("raw_score_mean", "size"), mean_score=("raw_score_mean", "mean"))
-            .query("n >= 5")
-            .reset_index()
-        )
-        combined = pd.concat(
-            [
-                grouped.nsmallest(8, "mean_score").assign(direction="Harmful"),
-                grouped.nlargest(8, "mean_score").assign(direction="Helpful"),
-            ],
-            ignore_index=True,
-        )
-        combined["short"] = combined["scaffold"].str.slice(0, 34)
+        table = scaffold_summary(payload["manifest"], payload["scores"])
+        seen = {}
+        labels = []
+        for value in table["short"]:
+            seen[value] = seen.get(value, 0) + 1
+            suffix = "" if seen[value] == 1 else f" ({seen[value]})"
+            labels.append(f"{value}{suffix}")
+        table = table.assign(label=labels)
         figure = go.Figure()
+        lookup = {}
         for direction, colour in (("Harmful", "#E45756"), ("Helpful", "#4C78A8")):
-            subset = combined.loc[combined["direction"].eq(direction)].sort_values(
-                "mean_score"
-            )
+            subset = table.loc[table["direction"].eq(direction)].sort_values("mean_score")
+            lookup[len(figure.data)] = subset["scaffold"].astype(str).tolist()
             figure.add_trace(
                 go.Bar(
                     x=subset["mean_score"],
-                    y=subset["short"],
+                    y=subset["label"],
                     orientation="h",
                     name=direction,
                     marker_color=colour,
-                    customdata=subset[["n", "scaffold"]],
+                    customdata=subset[["n", "scaffold", "label"]],
                     hovertemplate=(
                         "mean influence = %{x:+.4f}<br>molecules = %{customdata[0]}<br>"
                         "scaffold = %{customdata[1]}<extra></extra>"
@@ -1564,34 +1656,189 @@ def _(Chem, Draw, MurckoScaffold, TARGET_STYLE, go, pd, rotation, runs, style_fi
             yaxis={"gridcolor": "#EEEEEE", "tickfont": {"size": 10}},
             xaxis={"gridcolor": "#EEEEEE", "zeroline": True, "zerolinecolor": "#888888"},
         )
-        example_scaffold = str(grouped.nlargest(1, "mean_score").iloc[0]["scaffold"])
-        examples = training.loc[training["scaffold"].eq(example_scaffold)].sort_values(
-            "raw_score_mean", ascending=False
-        ).head(6)
-        molecules, legends = [], []
-        for _, row in examples.iterrows():
-            molecule = Chem.MolFromSmiles(str(row["canonical_smiles"]))
-            if molecule is None:
-                continue
-            molecules.append(molecule)
-            legends.append(f"{row['source']} · score {row['raw_score_mean']:+.4f}")
-        image = (
-            Draw.MolsToGridImage(
-                molecules, legends=legends, molsPerRow=3, subImgSize=(300, 220)
-            )
-            if molecules
-            else None
-        )
-        return figure, image
+        return table, figure, lookup
 
-    scaffold_figure, scaffold_image = _scaffold_panel()
-    scaffold_figure
-    return (scaffold_figure, scaffold_image)
+    scaffold_table, scaffold_figure, scaffold_lookup = _scaffold_view()
+    return (scaffold_figure, scaffold_lookup, scaffold_table)
 
 
 @app.cell
-def _(mo, scaffold_image):
-    mo.hstack([scaffold_image], justify="center")
+def _(mo, scaffold_figure, scaffold_lookup, scaffold_table):
+    scaffold_default_row = scaffold_table.nlargest(1, "mean_score").iloc[0]
+    scaffold_default = str(scaffold_default_row["scaffold"])
+    scaffold_options = dict(zip(scaffold_table["label"], scaffold_table["scaffold"]))
+    get_scaffold, set_scaffold = mo.state(scaffold_default)
+
+    def _bar_selected(value):
+        points = (value or {}).get("points") or []
+        if not points:
+            return
+        point = points[-1]
+        customdata = point.get("customdata")
+        if isinstance(customdata, (list, tuple)) and len(customdata) >= 2:
+            set_scaffold(str(customdata[1]))
+            return
+        if isinstance(customdata, dict) and customdata.get("scaffold"):
+            set_scaffold(str(customdata["scaffold"]))
+            return
+        if point.get("scaffold"):
+            set_scaffold(str(point["scaffold"]))
+            return
+        curve = point.get("curveNumber")
+        index = point.get("pointNumber", point.get("pointIndex"))
+        if curve is not None and index is not None:
+            bars = scaffold_lookup.get(int(curve), [])
+            if 0 <= int(index) < len(bars):
+                set_scaffold(bars[int(index)])
+
+    scaffold_plot = mo.ui.plotly(scaffold_figure, on_change=_bar_selected)
+    scaffold_picker = mo.ui.dropdown(
+        options=scaffold_options,
+        value=str(scaffold_default_row["label"]),
+        label="Scaffold fallback selector",
+        on_change=lambda label: set_scaffold(scaffold_options[label]),
+        full_width=True,
+    )
+    mo.vstack([scaffold_plot, scaffold_picker])
+    return (get_scaffold,)
+
+
+@app.cell
+def _(get_scaffold, molecule_records, rotation, runs, scaffold_of, scaffold_table):
+    def _scaffold_records():
+        payload = runs[rotation.value]
+        selected = str(get_scaffold())
+        if selected not in set(scaffold_table["scaffold"]):
+            selected = str(scaffold_table.nlargest(1, "mean_score").iloc[0]["scaffold"])
+        manifest = payload["manifest"]
+        training = manifest.loc[manifest["role"].eq("full_training")].copy()
+        training["scaffold"] = training["canonical_smiles"].map(scaffold_of)
+        member_ids = (
+            training.loc[training["scaffold"].eq(selected), "candidate_id"]
+            .astype(str)
+            .tolist()
+        )
+        scores = payload["scores"]
+        score_order = (
+            scores.drop_duplicates("candidate_id")
+            .set_index("candidate_id")["raw_score_mean"]
+        )
+        member_ids = sorted(
+            member_ids,
+            key=lambda candidate: score_order.get(candidate, float("-inf")),
+            reverse=True,
+        )
+        records = molecule_records(
+            manifest, scores, member_ids, cap=200, highlight_scaffold=selected
+        )
+        return selected, records
+
+    selected_scaffold, scaffold_records = _scaffold_records()
+    return (scaffold_records, selected_scaffold)
+
+
+@app.cell
+def _(
+    Chem,
+    Draw,
+    MoleculeGrid,
+    mo,
+    molgrid_available,
+    scaffold_records,
+    selected_scaffold,
+):
+    if molgrid_available:
+        scaffold_grid = mo.ui.anywidget(
+            MoleculeGrid(
+                molecules=scaffold_records,
+                title=(
+                    f"Scaffold explorer · {len(scaffold_records)} molecules · "
+                    f"{selected_scaffold[:44]}"
+                ),
+            )
+        )
+        scaffold_view = scaffold_grid
+    else:
+        scaffold_grid = None
+        molecules = [
+            molecule
+            for molecule in (
+                Chem.MolFromSmiles(record["smiles"]) for record in scaffold_records[:6]
+            )
+            if molecule is not None
+        ]
+        image = (
+            Draw.MolsToGridImage(molecules, molsPerRow=3, subImgSize=(300, 220))
+            if molecules
+            else None
+        )
+        fallback = [
+            mo.callout(
+                mo.md(
+                    "Install `anywidget` for the interactive molecule grid; showing a "
+                    "static fallback instead."
+                ),
+                kind="warn",
+            )
+        ]
+        if image is not None:
+            fallback.append(mo.hstack([image], justify="center"))
+        scaffold_view = mo.vstack(fallback)
+    scaffold_view
+    return (scaffold_grid,)
+
+
+@app.cell
+def _(mo, pd, rotation, runs, scaffold_grid):
+    def _selection_detail():
+        if scaffold_grid is None:
+            return mo.md("")
+        value = scaffold_grid.value if isinstance(scaffold_grid.value, dict) else {}
+        selected = [str(candidate) for candidate in value.get("selected", [])]
+        if not selected:
+            return mo.callout(
+                mo.md(
+                    "Click molecules in the grid to inspect their measured labels, "
+                    "influences, and similarities."
+                ),
+                kind="info",
+            )
+        payload = runs[rotation.value]
+        manifest = payload["manifest"].drop_duplicates("candidate_id").set_index(
+            "candidate_id"
+        )
+        scores = payload["scores"].drop_duplicates("candidate_id").set_index(
+            "candidate_id"
+        )
+        rows = []
+        for candidate in selected:
+            if candidate not in manifest.index:
+                continue
+            row = manifest.loc[candidate]
+            score_row = scores.loc[candidate] if candidate in scores.index else None
+            rows.append(
+                {
+                    "molecule": str(row.get("original_id", candidate)),
+                    "source": str(row.get("source", "")),
+                    "role": str(row.get("role", "")),
+                    "label": row.get("model_target"),
+                    "influence": None
+                    if score_row is None
+                    else score_row.get("raw_score_mean"),
+                    "max tanimoto": None
+                    if score_row is None
+                    else score_row.get("max_tanimoto_to_selection"),
+                    "inchikey": str(row.get("inchikey", "")),
+                }
+            )
+        return mo.vstack(
+            [
+                mo.md(f"**Selected molecules** · {len(rows)}"),
+                mo.ui.table(pd.DataFrame(rows), selection=None),
+            ]
+        )
+
+    _selection_detail()
     return
 
 

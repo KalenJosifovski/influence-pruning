@@ -119,9 +119,36 @@ disagrees. They never fit models, recompute attribution, regenerate partitions, 
 bootstrap resamples. They may export derived figures to `analysis/<run-id>/`.
 
 ```bash
-pixi run -e dev notebooks          # view
-pixi run -e dev notebooks-edit     # edit
+pixi run -e dev notebooks             # view all notebooks
+pixi run -e dev pooling-surgery       # run notebook 04 as an app
+pixi run -e dev pooling-surgery-edit  # edit notebook 04
 ```
+
+`notebooks/04_pooling_surgery.py` ("Pooling Under the Knife") is the cross-target story: it
+compares pooling against local-only training across the three rotations, validates the BoostIn
+deletion direction with paired resample draws, explains the label confound, and closes with
+calibration and chemical-space panels. It ships a custom anywidget molecule explorer
+(`src/influence_pruning/molgrid.py`) with search, sorting, click selection, scaffold
+highlighting, and box/lasso brushing from the PCA map. The widget degrades to a static RDKit
+grid when `anywidget` is unavailable.
+
+### Running on molab
+
+The notebook carries a PEP 723 header, and `anywidget` is a declared dependency, so molab
+installs it on import. molab grants additional files through the notebook's storage panel
+(sidebar uploads, or anything cached with `mo.persistent_cache`, are the only persistent
+paths), so the notebook needs the `influence_pruning` package plus these files per rotation:
+
+| Bundle | Files per rotation | All three rotations |
+| :--- | :--- | ---: |
+| Run frames | `COMPLETED`, `run_facts.json`, `partition_manifest.parquet`, `boostin_scores.parquet`, `arm_manifest.parquet`, `seed_metrics.parquet`, `predictions.parquet` | 26 MB |
+| Corrected effects | `analysis/effects_recomputed/<run>/paired_effects.parquet` | 0.2 MB |
+| Resample draws | `analysis/effects_recomputed/<run>/bootstrap_draws.parquet` | 32 MB (ranked-only subset 7 MB) |
+
+Raw `results/` directories stay local; nothing the notebook reads exceeds roughly 60 MB even
+with every draw, so molab's persistent storage is not a constraint. The only real requirement
+is that the `influence_pruning` package is importable in the molab session (uploaded, installed
+from the repository, or supplied as a wheel).
 
 ## Repository layout
 
