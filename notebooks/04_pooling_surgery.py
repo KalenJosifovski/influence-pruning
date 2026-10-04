@@ -47,7 +47,7 @@ def _():
     # molab bootstrap: restore the self-extracting upload bundle when running outside the
     # repository checkout (no-op locally, where the zip is absent). `publish_molab.py` fills
     # in the release URL, so a synced or forked molab notebook can fetch the data itself.
-    MOLAB_BUNDLE_URL = ""
+    MOLAB_BUNDLE_URL = "https://github.com/KalenJosifovski/influence-pruning/releases/latest/download/molab_bundle.zip"
     _has_local_package = any((_root / "src" / "influence_pruning").is_dir() for _root in _roots)
     _target_zip = _roots[0] / "molab_bundle.zip"
     if MOLAB_BUNDLE_URL and not _has_local_package and not _target_zip.is_file():
