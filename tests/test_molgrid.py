@@ -4,11 +4,13 @@ import pandas as pd
 
 from influence_pruning.molgrid import (
     MoleculeGrid,
+    ScaffoldBars,
     draw_svg,
     molecule_records,
     scaffold_atoms,
     scaffold_of,
     scaffold_summary,
+    selection_ids,
 )
 
 
@@ -101,3 +103,28 @@ def test_molecule_grid_is_an_anywidget_with_synced_traits() -> None:
     assert set(grid.traits(sync=True)) >= {"molecules", "selected", "title"}
     assert grid.selected == []
     assert grid.title == "Test"
+
+
+def test_scaffold_bars_is_an_anywidget_with_synced_traits() -> None:
+    bars = ScaffoldBars(scaffolds=[], selected="c1ccccc1", title="Test")
+    assert set(bars.traits(sync=True)) >= {"scaffolds", "selected", "title"}
+    assert bars.selected == "c1ccccc1"
+
+
+def test_selection_ids_resolves_every_marimo_payload_shape() -> None:
+    lookup = {0: ["a", "b"], 1: ["c"]}
+    # Box/lasso extraction: list of points with only curve/point coordinates.
+    assert selection_ids([{"curveNumber": 0, "pointIndex": 1}], lookup) == ["b"]
+    # Dict wrapper from older selection payloads.
+    assert selection_ids({"points": [{"customdata": ["c", 1.0]}]}, lookup) == ["c"]
+    # Click payloads: named field, list customdata, dict customdata, and pointNumber.
+    assert selection_ids([{"candidate_id": "z"}], lookup) == ["z"]
+    assert selection_ids([{"customdata": {"candidate_id": "q"}}], lookup) == ["q"]
+    assert selection_ids(
+        [{"curveNumber": 0, "pointNumber": 0}, {"curveNumber": 1, "pointIndex": 0}],
+        lookup,
+    ) == ["a", "c"]
+    # Empty and malformed payloads never raise.
+    assert selection_ids([], lookup) == []
+    assert selection_ids(None, lookup) == []
+    assert selection_ids([{"curveNumber": 9, "pointIndex": 3}], lookup) == []

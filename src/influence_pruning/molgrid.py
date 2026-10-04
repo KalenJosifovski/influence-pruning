@@ -31,10 +31,12 @@ except ImportError:  # pragma: no cover - the widget is optional outside the dev
 
 __all__ = [
     "MoleculeGrid",
+    "ScaffoldBars",
     "draw_svg",
     "molecule_records",
     "scaffold_of",
     "scaffold_summary",
+    "selection_ids",
 ]
 
 _GRID_ESM = """
@@ -226,6 +228,102 @@ _GRID_CSS = """
 .molgrid-stats { font-size: 10.5px; color: #555555; }
 """
 
+_BARS_ESM = """
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
+
+function render({ model, el }) {
+  el.classList.add("scaffoldbars");
+  const title = document.createElement("div");
+  title.className = "scaffoldbars-title";
+  const hint = document.createElement("div");
+  hint.className = "scaffoldbars-hint";
+  const list = document.createElement("div");
+  list.className = "scaffoldbars-list";
+  el.append(title, hint, list);
+
+  function draw() {
+    const scaffolds = model.get("scaffolds") || [];
+    const selected = model.get("selected");
+    title.textContent = model.get("title") || "Scaffold influence";
+    hint.textContent = "Click a bar to load its molecules into the grid below";
+    list.innerHTML = "";
+    const maxAbs = Math.max(
+      ...scaffolds.map((record) => Math.abs(record.mean_score || 0)),
+      1e-9,
+    );
+    for (const record of scaffolds) {
+      const value = record.mean_score || 0;
+      const width = Math.max(2, (Math.abs(value) / maxAbs) * 100);
+      const row = document.createElement("div");
+      row.className =
+        "scaffoldbars-row" + (record.scaffold === selected ? " selected" : "");
+      row.innerHTML =
+        `<div class="scaffoldbars-head">` +
+        `<span class="scaffoldbars-label">${escapeHtml(record.label)}</span>` +
+        `<span class="scaffoldbars-meta">n=${record.n} · ` +
+        `${value >= 0 ? "+" : ""}${value.toFixed(4)}</span>` +
+        `</div>` +
+        `<div class="scaffoldbars-track">` +
+        `<div class="scaffoldbars-fill ${value >= 0 ? "positive" : "negative"}" ` +
+        `style="width:${width}%"></div>` +
+        `</div>`;
+      row.addEventListener("click", () => {
+        model.set("selected", record.scaffold);
+        model.save_changes();
+      });
+      list.append(row);
+    }
+  }
+
+  model.on("change:scaffolds", draw);
+  model.on("change:selected", draw);
+  model.on("change:title", draw);
+  draw();
+}
+
+export default { render };
+"""
+
+_BARS_CSS = """
+.scaffoldbars { font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+.scaffoldbars-title { font-size: 14px; font-weight: 600; color: #222222; }
+.scaffoldbars-hint { font-size: 11.5px; color: #777777; margin: 2px 0 10px; }
+.scaffoldbars-list {
+  display: flex; flex-direction: column; gap: 6px; max-height: 560px;
+  overflow-y: auto; padding-right: 4px;
+}
+.scaffoldbars-row {
+  border: 1px solid #ececec; border-radius: 8px; padding: 6px 10px;
+  cursor: pointer; background: white;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.scaffoldbars-row:hover { border-color: #b9b9b9; }
+.scaffoldbars-row.selected {
+  border-color: #6A3D9A; box-shadow: 0 0 0 2px rgba(106, 61, 154, 0.22);
+  background: #faf7ff;
+}
+.scaffoldbars-head {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 11.5px; color: #333333;
+}
+.scaffoldbars-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scaffoldbars-meta { color: #777777; flex-shrink: 0; }
+.scaffoldbars-track {
+  height: 7px; background: #f3f3f3; border-radius: 4px; margin-top: 5px;
+  overflow: hidden;
+}
+.scaffoldbars-fill { height: 100%; border-radius: 4px; }
+.scaffoldbars-fill.positive { background: #4C78A8; }
+.scaffoldbars-fill.negative { background: #E45756; }
+"""
+
 _PLACEHOLDER_SVG = (
     "<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' "
     "viewBox='0 0 {width} {height}'>"
@@ -252,8 +350,25 @@ if anywidget is not None:
         selected = traitlets.List([]).tag(sync=True)
         title = traitlets.Unicode("Molecules").tag(sync=True)
 
+    class ScaffoldBars(anywidget.AnyWidget):  # type: ignore[misc]
+        """Clickable horizontal bars ranking scaffolds by mean influence.
+
+        :param scaffolds: list of records with ``scaffold``, ``label``, ``n``,
+            ``mean_score``, and ``direction``.
+        :param selected: scaffold SMILES currently selected.
+        :param title: heading shown above the bars.
+        """
+
+        _esm = _BARS_ESM
+        _css = _BARS_CSS
+
+        scaffolds = traitlets.List([]).tag(sync=True)
+        selected = traitlets.Unicode("").tag(sync=True)
+        title = traitlets.Unicode("Scaffold influence").tag(sync=True)
+
 else:  # pragma: no cover - exercised only when anywidget is absent
     MoleculeGrid = None  # type: ignore[assignment,misc]
+    ScaffoldBars = None  # type: ignore[assignment,misc]
 
 
 def scaffold_of(smiles: str) -> str:
@@ -393,6 +508,48 @@ def scaffold_summary(
     )
     combined["short"] = combined["scaffold"].str.slice(0, 40)
     return combined
+
+
+def selection_ids(
+    selection: object,
+    lookup: dict[int, Sequence[str]],
+) -> list[str]:
+    """Resolve a marimo plotly selection payload into candidate identifiers.
+
+    marimo can hand back the selection as a list of point dicts (clicks) or as a dict with a
+    ``points`` list (box/lasso extraction). Click points may carry ``customdata``, while
+    box/lasso-extracted points only carry ``curveNumber`` and ``pointIndex``, which are
+    resolved through `lookup` (trace index → identifiers in trace row order).
+
+    :param selection: raw ``mo.ui.plotly`` value.
+    :param lookup: trace curve number to its row-ordered candidate identifiers.
+    :returns: deduplicated identifiers in first-seen order.
+    """
+    if isinstance(selection, list):
+        points = [point for point in selection if isinstance(point, dict)]
+    elif isinstance(selection, dict):
+        points = selection.get("points") or []
+    else:
+        points = []
+    found: list[str] = []
+    for point in points:
+        customdata = point.get("customdata")
+        if isinstance(customdata, (list, tuple)) and customdata:
+            found.append(str(customdata[0]))
+            continue
+        if isinstance(customdata, dict) and customdata.get("candidate_id"):
+            found.append(str(customdata["candidate_id"]))
+            continue
+        if point.get("candidate_id"):
+            found.append(str(point["candidate_id"]))
+            continue
+        curve = point.get("curveNumber")
+        index = point.get("pointNumber", point.get("pointIndex"))
+        if curve is not None and index is not None:
+            trace_ids = lookup.get(int(curve), [])
+            if 0 <= int(index) < len(trace_ids):
+                found.append(str(trace_ids[int(index)]))
+    return list(dict.fromkeys(found))
 
 
 def _finite_or_none(value: object) -> float | None:

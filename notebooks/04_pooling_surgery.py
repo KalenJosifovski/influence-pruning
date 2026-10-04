@@ -69,13 +69,23 @@ def _():
 def _():
     from influence_pruning.molgrid import (
         MoleculeGrid,
+        ScaffoldBars,
         molecule_records,
         scaffold_of,
         scaffold_summary,
+        selection_ids,
     )
 
     molgrid_available = MoleculeGrid is not None
-    return MoleculeGrid, molgrid_available, molecule_records, scaffold_of, scaffold_summary
+    return (
+        MoleculeGrid,
+        ScaffoldBars,
+        molgrid_available,
+        molecule_records,
+        scaffold_of,
+        scaffold_summary,
+        selection_ids,
+    )
 
 
 @app.cell
@@ -1545,27 +1555,9 @@ def _(
     pca_plot,
     rotation,
     runs,
+    selection_ids,
 ):
-    def _brushed_ids():
-        value = pca_plot.value if isinstance(pca_plot.value, dict) else {}
-        found = []
-        for point in value.get("points") or []:
-            customdata = point.get("customdata")
-            if isinstance(customdata, (list, tuple)) and customdata:
-                found.append(str(customdata[0]))
-            elif isinstance(customdata, dict) and "candidate_id" in customdata:
-                found.append(str(customdata["candidate_id"]))
-            elif point.get("curveNumber") is not None and (
-                point.get("pointNumber") is not None
-                or point.get("pointIndex") is not None
-            ):
-                trace_ids = chem_selection_lookup.get(int(point["curveNumber"]), [])
-                index = int(point.get("pointNumber", point.get("pointIndex")))
-                if 0 <= index < len(trace_ids):
-                    found.append(str(trace_ids[index]))
-        return list(dict.fromkeys(found))
-
-    brushed_ids = _brushed_ids()
+    brushed_ids = selection_ids(pca_plot.value, chem_selection_lookup)
     payload = runs[rotation.value]
     brushed_records = (
         molecule_records(payload["manifest"], payload["scores"], brushed_ids, cap=200)
@@ -1580,7 +1572,8 @@ def _(
     elif not brushed_records:
         brushed_view = mo.callout(
             mo.md(
-                "**Box-select or lasso points on the map** to load those molecules below."
+                "**Pick the box-select or lasso tool in the map's mode bar**, then drag "
+                "around points to load those molecules below."
             ),
             kind="info",
         )
@@ -1610,9 +1603,9 @@ def _(dedent, mo):
             ### Scaffold view
 
             Aggregating at the Bemis–Murcko level asks whether the signal is chemically
-            interpretable. Click a bar — or use the fallback selector — to load that scaffold's
-            molecules into the interactive grid. The grid supports search, sorting, and click
-            selection; highlighted atoms mark the scaffold.
+            interpretable. Click a bar in the scaffold selector to load that scaffold's molecules
+            into the interactive grid. The grid supports search, sorting, and click selection;
+            highlighted atoms mark the scaffold.
             """
         )
     )
@@ -1632,10 +1625,8 @@ def _(TARGET_STYLE, go, rotation, runs, scaffold_summary, style_figure):
             labels.append(f"{value}{suffix}")
         table = table.assign(label=labels)
         figure = go.Figure()
-        lookup = {}
         for direction, colour in (("Harmful", "#E45756"), ("Helpful", "#4C78A8")):
             subset = table.loc[table["direction"].eq(direction)].sort_values("mean_score")
-            lookup[len(figure.data)] = subset["scaffold"].astype(str).tolist()
             figure.add_trace(
                 go.Bar(
                     x=subset["mean_score"],
@@ -1658,58 +1649,60 @@ def _(TARGET_STYLE, go, rotation, runs, scaffold_summary, style_figure):
             yaxis={"gridcolor": "#EEEEEE", "tickfont": {"size": 10}},
             xaxis={"gridcolor": "#EEEEEE", "zeroline": True, "zerolinecolor": "#888888"},
         )
-        return table, figure, lookup
+        bar_records = (
+            table.sort_values("mean_score", ascending=False)
+            .loc[:, ["scaffold", "label", "n", "mean_score", "direction"]]
+            .to_dict("records")
+        )
+        return table, figure, bar_records
 
-    scaffold_table, scaffold_figure, scaffold_lookup = _scaffold_view()
-    return (scaffold_figure, scaffold_lookup, scaffold_table)
+    scaffold_table, scaffold_figure, scaffold_bar_records = _scaffold_view()
+    return (scaffold_bar_records, scaffold_figure, scaffold_table)
 
 
 @app.cell
-def _(mo, scaffold_figure, scaffold_lookup, scaffold_table):
+def _(
+    ScaffoldBars,
+    TARGET_STYLE,
+    mo,
+    molgrid_available,
+    rotation,
+    scaffold_bar_records,
+    scaffold_figure,
+    scaffold_table,
+):
     scaffold_default_row = scaffold_table.nlargest(1, "mean_score").iloc[0]
     scaffold_default = str(scaffold_default_row["scaffold"])
-    scaffold_options = dict(zip(scaffold_table["label"], scaffold_table["scaffold"]))
-    get_scaffold, set_scaffold = mo.state(scaffold_default)
-
-    def _bar_selected(value):
-        points = (value or {}).get("points") or []
-        if not points:
-            return
-        point = points[-1]
-        customdata = point.get("customdata")
-        if isinstance(customdata, (list, tuple)) and len(customdata) >= 2:
-            set_scaffold(str(customdata[1]))
-            return
-        if isinstance(customdata, dict) and customdata.get("scaffold"):
-            set_scaffold(str(customdata["scaffold"]))
-            return
-        if point.get("scaffold"):
-            set_scaffold(str(point["scaffold"]))
-            return
-        curve = point.get("curveNumber")
-        index = point.get("pointNumber", point.get("pointIndex"))
-        if curve is not None and index is not None:
-            bars = scaffold_lookup.get(int(curve), [])
-            if 0 <= int(index) < len(bars):
-                set_scaffold(bars[int(index)])
-
-    scaffold_plot = mo.ui.plotly(scaffold_figure, on_change=_bar_selected)
-    scaffold_picker = mo.ui.dropdown(
-        options=scaffold_options,
-        value=str(scaffold_default_row["label"]),
-        label="Scaffold fallback selector",
-        on_change=lambda label: set_scaffold(scaffold_options[label]),
-        full_width=True,
-    )
-    mo.vstack([scaffold_plot, scaffold_picker])
-    return (get_scaffold,)
+    if molgrid_available:
+        scaffold_control = mo.ui.anywidget(
+            ScaffoldBars(
+                scaffolds=scaffold_bar_records,
+                selected=scaffold_default,
+                title=f"Scaffold influence · {TARGET_STYLE[rotation.value]['label']}",
+            )
+        )
+        scaffold_selector = scaffold_control
+    else:
+        scaffold_control = mo.ui.dropdown(
+            options=dict(zip(scaffold_table["label"], scaffold_table["scaffold"])),
+            value=str(scaffold_default_row["label"]),
+            label="Scaffold selector",
+            full_width=True,
+        )
+        scaffold_selector = mo.vstack([scaffold_figure, scaffold_control])
+    scaffold_selector
+    return (scaffold_control,)
 
 
 @app.cell
-def _(get_scaffold, molecule_records, rotation, runs, scaffold_of, scaffold_table):
+def _(molecule_records, rotation, runs, scaffold_control, scaffold_of, scaffold_table):
     def _scaffold_records():
         payload = runs[rotation.value]
-        selected = str(get_scaffold())
+        raw_selection = scaffold_control.value
+        if isinstance(raw_selection, dict):
+            selected = str(raw_selection.get("selected") or "")
+        else:
+            selected = str(raw_selection or "")
         if selected not in set(scaffold_table["scaffold"]):
             selected = str(scaffold_table.nlargest(1, "mean_score").iloc[0]["scaffold"])
         manifest = payload["manifest"]
