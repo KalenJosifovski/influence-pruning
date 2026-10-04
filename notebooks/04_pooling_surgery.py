@@ -465,6 +465,31 @@ def _(TARGET_ORDER, TARGET_STYLE, mo, runs):
 
 
 @app.cell
+def _(Speaker, mo, molgrid_available):
+    spoken_verdict = (
+        "Pooling under the knife. Across three target rotations the pooling point estimate "
+        "changes sign, and every interval includes zero. The deletion direction is consistent: "
+        "on native chemistry, removing high influence molecules did worse than removing low "
+        "influence ones in all three rotations. The ranking is dominated by measured label "
+        "level rather than the chemical similarity summary used in this notebook."
+    )
+    if molgrid_available:
+        speaker_view = mo.vstack(
+            [
+                mo.md(
+                    "**Prefer listening?** The button below reads a 30-second summary; pick a "
+                    "voice and speed beside it. Speech synthesis runs entirely in your browser."
+                ),
+                mo.ui.anywidget(Speaker(text=spoken_verdict, label="Hear the 30-second summary")),
+            ]
+        )
+    else:
+        speaker_view = mo.md("")
+    speaker_view
+    return
+
+
+@app.cell
 def _(TARGET_ORDER, TARGET_STYLE, mo, runs):
     available = [target for target in TARGET_ORDER if target in runs]
     rotation = mo.ui.dropdown(
@@ -1881,28 +1906,10 @@ def _(mo, pd, rotation, runs, scaffold_grid):
 
 
 @app.cell
-def _(Speaker, mo, molgrid_available):
-    spoken_verdict = (
-        "Pooling under the knife. Across three target rotations the pooling point estimate "
-        "changes sign, and every interval includes zero. The deletion direction is consistent: "
-        "on native chemistry, removing high influence molecules did worse than removing low "
-        "influence ones in all three rotations. The ranking is dominated by measured label level "
-        "rather than the chemical similarity summary used in this notebook."
-    )
-    verdict_speaker = (
-        mo.ui.anywidget(Speaker(text=spoken_verdict, label="Hear the verdict"))
-        if molgrid_available
-        else mo.md("")
-    )
-    return (verdict_speaker,)
-
-
-@app.cell
-def _(mo, verdict_speaker):
+def _(mo):
     mo.vstack(
         [
             mo.md("## 7 · The bottom line"),
-            verdict_speaker,
             mo.md(
                 """
                 - **Pooling is not one decision.** Across the three rotations the point estimate
