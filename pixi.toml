@@ -1,0 +1,65 @@
+[workspace]
+authors = ["Kalen Josifovski <kalenjosifovski@gmail.com>"]
+channels = ["conda-forge"]
+name = "influence-pruning"
+platforms = ["osx-arm64", "linux-64"]
+version = "0.1.0"
+
+[dependencies]
+python = "3.12.*"
+matplotlib = ">=3.9,<4"
+pandas = ">=2.2,<3"
+pyarrow = ">=17,<23"
+pyyaml = ">=6.0,<7"
+rdkit = ">=2024.9,<2027"
+seaborn = ">=0.13,<1"
+# The dev environment fits small XGBoost models in evaluation and bootstrap tests; the
+# isolated influence environment keeps its own pinned XGBoost with numpy<2.
+xgboost = ">=2.1,<4"
+
+[feature.dev.dependencies]
+pytest = ">=8.3,<9"
+ruff = ">=0.11,<1"
+marimo = ">=0.14,<1"
+plotly = ">=7.1.0,<8"
+
+# tree-influence requires numpy<2 and a pinned XGBoost release, which cannot join the
+# numpy>=2 default solve, so this feature excludes the default feature entirely.
+# It must carry every runtime dependency of the Phase 1 CLI: no script switches environments.
+[feature.influence.dependencies]
+python = "3.12.*"
+numpy = "1.26.*"
+xgboost = "3.4.*"
+pandas = ">=2.2,<3"
+pyarrow = ">=17,<23"
+pyyaml = ">=6.0,<7"
+rdkit = ">=2024.9,<2027"
+matplotlib = ">=3.9,<4"
+seaborn = ">=0.13,<1"
+pytest = ">=8.3,<9"
+
+[feature.influence.pypi-dependencies]
+tree-influence = { git = "https://github.com/jjbrophy47/tree_influence", rev = "a32579475adee845547a71f992f238807b1a2d1d" }
+
+[feature.influence.tasks]
+# This environment excludes the default feature, so shared tasks are not visible here;
+# these narrowly scoped twins keep the isolation without touching the dev solve.
+ipp = { cmd = "python -m influence_pruning", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
+test-influence = { cmd = "python -m pytest", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
+
+[environments]
+base = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+influence = { features = ["influence"], solve-group = "influence", no-default-feature = true }
+
+[tasks]
+ipp = { cmd = "python -m influence_pruning", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
+test = { cmd = "python -m pytest", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
+lint = "python -m ruff check src tests"
+fmt = "python -m ruff format src tests"
+notebooks = { cmd = "marimo run notebooks", env = { PYTHONPATH = "src" } }
+notebooks-edit = { cmd = "marimo edit notebooks", env = { PYTHONPATH = "src" } }
+public-data-surgeon = { cmd = "marimo run notebooks/03_public_data_surgeon.py", env = { PYTHONPATH = "src" } }
+public-data-surgeon-edit = { cmd = "marimo edit notebooks/03_public_data_surgeon.py", env = { PYTHONPATH = "src" } }
+pooling-surgery = { cmd = "marimo run notebooks/04_pooling_surgery.py", env = { PYTHONPATH = "src" } }
+pooling-surgery-edit = { cmd = "marimo edit notebooks/04_pooling_surgery.py", env = { PYTHONPATH = "src" } }

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "influence-pruning"
+version = "0.1.0"
+description = "Conditional BoostIn batch-pruning study for pooled molecular-property models."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "pyarrow",
+  "pyyaml",
+  "rdkit",
+  "seaborn",
+  "xgboost",
+]
+
+[project.scripts]
+ipp = "influence_pruning.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/influence_pruning"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Marimo notebooks display their final expression, which Ruff reads as a useless expression.
+"notebooks/*.py" = ["B018"]

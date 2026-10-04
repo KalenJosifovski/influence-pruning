@@ -1,0 +1,70 @@
+# Phase 1 BoostIn pruning: ExpansionRx target, supplied late test split into temporal halves.
+# Run with the isolated influence environment:
+#   pixi run -e influence ipp dry-run --config configs/dryrun_boostin_expansionrx_hlm.yaml
+#   pixi run -e influence ipp boostin-prune --config configs/boostin_expansionrx_hlm.yaml
+# The supplied ExpansionRx test has informed prior exploratory work, so results from this
+# configuration are temporally ordered exploratory analyses, not prospective confirmation.
+
+study:
+  kind: boostin_pruning
+  phase: exploratory
+
+endpoint: hlm_clint
+target: expansionrx
+donor_sources: [biogen, polaris]
+paths_file: configs/paths.local.yaml
+results_root: results
+
+split:
+  expansionrx_test_mode: temporal_halves
+  target_test_selection_fraction: 0.50
+  butina_distance_threshold: 0.40
+  butina_seed: 0
+
+model:
+  radius: 2
+  n_bits: 2048
+  chirality: false
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  min_child_weight: 1.0
+  subsample: 0.8
+  colsample_bytree: 0.8
+  reg_lambda: 1.0
+  tree_method: hist
+  n_jobs: -1
+
+boostin:
+  score_seeds: [0, 1, 2, 3, 4]
+  outcome_seeds: [0, 1, 2, 3, 4]
+  batch_sizes: [25, 50, 100, 150]
+  random_draws: 10
+  matching_draws: 10
+  label_match_bins: [10, 5, 3]
+
+bootstrap:
+  n_resamples: 2000
+  cluster_distance_threshold: 0.40
+  seed: 0
+
+contract_overrides:
+  "hlm_clint:polaris":
+    units_in: "µL/min/mg microsomal protein (Bienta microsomal stability, protocols.io 5qpvokdb9l4o)"
+    units_out: "log10 mL/min/kg"
+    transform_name: "log10_positive"
+    positive_only: true
+    scale_factor: 0.9
+    minimum_quantification_limit: 10.0
+    evidence: >-
+      Bienta microsomal Clint is in µL/min/mg microsomal protein. Applying the Biogen human
+      IVIVE convention, 45 mg microsomal protein/g liver × 20 g liver/kg ÷ 1000 µL/mL gives
+      ×0.9 mL/min/kg before log10 transformation. Values below 10 µL/min/mg are censored.
+      Residual assay differences are deliberately retained as part of the transfer phenomenon.
+
+limits:
+  max_target_train: null
+  max_target_selection: null
+  max_donor_rows: null
+
+dry_run: false

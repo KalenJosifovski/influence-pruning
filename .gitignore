@@ -1,0 +1,21 @@
+# environments
+.pixi/
+.venv/
+
+# python
+__pycache__/
+*.py[cod]
+
+# tooling caches
+.ruff_cache/
+.pytest_cache/
+
+# experiment outputs
+results/
+
+# notebook figure exports and marimo session caches
+analysis/
+notebooks/__marimo__/
+
+# machine-specific raw dataset paths
+configs/paths.local.yaml

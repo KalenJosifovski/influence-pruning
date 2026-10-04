@@ -1,0 +1,6 @@
+# Copy to configs/paths.local.yaml and point at the local dataset catalogue.
+# This file must never refer to or scan ~/datasets/nuclear_receptor_hts/.
+expansionrx_train: /absolute/path/to/openadmet/data/expansionrx/expansion_data_train.csv
+expansionrx_test: /absolute/path/to/openadmet/data/expansionrx_test/expansion_data_test.csv
+biogen: /absolute/path/to/biogen_adme/data/ADME_public_set_3521.csv
+polaris: /absolute/path/to/asap_polaris_openadmet/data/ADMET.csv
