@@ -768,6 +768,7 @@ def _(
             "mixed_pool": "#7A5AA6",
             "donor_only": "#F58518",
         }
+        shared_bottom = min(0.0, float(contrast_table["ci_low"].min()) * 1.05)
         for index, (pool, stratum, _) in enumerate(panel_specs):
             row, col = divmod(index, n_cols)
             subset = contrast_table.loc[
@@ -806,12 +807,20 @@ def _(
                 row=row + 1,
                 col=col + 1,
             )
+            highs = float(subset["ci_high"].max())
+            if pool == "donor_only":
+                top = max(highs * 1.15, 0.002)
+            else:
+                top = max(0.2, highs * 1.05)
+            figure.update_yaxes(
+                range=[shared_bottom, top], row=row + 1, col=col + 1
+            )
             figure.add_hline(
                 y=0, line_dash="dash", line_color="#888888", row=row + 1, col=col + 1
             )
             figure.add_hrect(
                 y0=0,
-                y1=1,
+                y1=top,
                 fillcolor="#54A24B",
                 opacity=0.05,
                 line_width=0,
@@ -826,9 +835,19 @@ def _(
             figure,
             f"Surgical dose–response · {TARGET_STYLE[rotation.value]['label']} target",
             height=310 * n_rows,
-            yaxis_title="ΔRMSE (high-influence removal − low-influence removal)",
             xaxis_title="Molecules removed per arm",
             hovermode="closest",
+            margin={"l": 95, "r": 30, "t": 80, "b": 60},
+        )
+        figure.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=-0.05,
+            y=0.5,
+            text="ΔRMSE (high-influence removal − low-influence removal)",
+            textangle=-90,
+            showarrow=False,
+            font={"size": 12.5, "color": "#444444"},
         )
         for annotation in figure.layout.annotations[: len(panel_specs)]:
             annotation.update(font={"size": 13})
@@ -1213,12 +1232,27 @@ def _(dedent, mo):
         dedent(
             """
             ## 5 · What changed inside the model
-    
-            An RMSE change can be a calibration shift (bias) or a change in the centred error
-            (molecular relationship). Reading bias, centred RMSE, and RMSE together explains the
-            pooling decision: for **Polaris**, local-only is badly biased and pooling repairs the
-            bias, while high-influence removal destroys that repair; for **Biogen**, the conditions
-            separate mainly through centred error.
+
+            An RMSE change can come from two very different places, and this panel separates
+            them. Write the residual on the held-out surface as `r = observed − predicted`:
+
+            - **Bias** = `mean(r)`. A positive bias means the model under-predicts on average;
+              a constant shift could remove it, so this is *calibration* error.
+            - **Centred RMSE** = `sqrt(mean((r − mean(r))²))`. This is the residual spread left
+              after removing that shift — the part no constant correction can fix, so it
+              reflects the learned *molecular relationship*.
+            - The three bars are linked exactly: **RMSE² = Bias² + Centred RMSE²**, so the first
+              two decompose the third.
+
+            Read each group of bars left to right. If an intervention moves mostly the bias bar,
+            it behaves like a label-level calibration shift; if it moves mostly the centred bar,
+            it changed which molecules the model gets right. In these rotations the failure
+            modes differ: **Polaris** local-only is badly biased and pooling repairs the bias,
+            while high-influence removal throws that repair away; **Biogen** separates through
+            centred error instead; **ExpansionRx** sits in between. The colour scheme encodes
+            the design — blue/grey for the baselines, warm tones for high-influence removal,
+            green tones for low-influence removal, with darker shades for the native pool and
+            lighter shades for the mixed pool.
             """
         )
     )
@@ -1274,12 +1308,12 @@ def _(TARGET_STYLE, go, np, pd, rotation, runs, style_figure):
             .reset_index()
         )
         colours = {
-            "Full pooled": "#4C78A8",
-            "Local only": "#E45756",
-            "Native high removal": "#B23A48",
-            "Native low removal": "#2E8B57",
-            "Mixed high removal": "#8E6BBB",
-            "Mixed low removal": "#4FA3A5",
+            "Full pooled": "#2E6E9E",
+            "Local only": "#8C8C8C",
+            "Native high removal": "#C0392B",
+            "Mixed high removal": "#E08A7F",
+            "Native low removal": "#1E8449",
+            "Mixed low removal": "#7DCEA0",
         }
         figure = go.Figure()
         for _, row in decomposition.iterrows():
@@ -1556,8 +1590,8 @@ def _(Chem, Draw, MurckoScaffold, TARGET_STYLE, go, pd, rotation, runs, style_fi
 
 
 @app.cell
-def _(scaffold_image):
-    scaffold_image
+def _(mo, scaffold_image):
+    mo.hstack([scaffold_image], justify="center")
     return
 
 
