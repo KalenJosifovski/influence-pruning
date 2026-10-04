@@ -31,6 +31,7 @@ app = marimo.App(width="full")
 
 @app.cell
 def _():
+    import contextlib
     import json
     import pathlib
     import sys
@@ -44,7 +45,17 @@ def _():
         _roots.append(_notebook_root)
 
     # molab bootstrap: restore the self-extracting upload bundle when running outside the
-    # repository checkout (no-op locally, where the zip is absent).
+    # repository checkout (no-op locally, where the zip is absent). `publish_molab.py` fills
+    # in the release URL, so a synced or forked molab notebook can fetch the data itself.
+    MOLAB_BUNDLE_URL = ""
+    _has_local_package = any((_root / "src" / "influence_pruning").is_dir() for _root in _roots)
+    _target_zip = _roots[0] / "molab_bundle.zip"
+    if MOLAB_BUNDLE_URL and not _has_local_package and not _target_zip.is_file():
+        import urllib.request
+
+        with contextlib.suppress(OSError):
+            urllib.request.urlretrieve(MOLAB_BUNDLE_URL, _target_zip)
+
     for _root in _roots:
         _bundle_zip = _root / "molab_bundle.zip"
         if _bundle_zip.is_file() and not (_root / "src" / "influence_pruning").is_dir():

@@ -163,6 +163,24 @@ Nothing is too large for molab: the built zip is ~53 MB, comfortably within the 
 storage panel, and the notebook recomputes the draw cache in about 40 s if it is omitted.
 The bundle builder skips dry-run and stale-schema runs automatically.
 
+### Automating updates with GitHub
+
+molab has no upload API; its supported automation is GitHub mirroring. Once the repository
+exists and a synced notebook is created in molab, every `git push` refreshes the molab
+notebook. The publish helper wires this up:
+
+```bash
+pixi run -e dev molab-publish -- --repo <owner>/<name> [--private]
+```
+
+It checks `gh` authentication, creates the repository when missing, writes the release
+asset URL into the notebook's `MOLAB_BUNDLE_URL`, builds and uploads `molab_bundle.zip` to
+the `molab-bundle` release, pushes, and prints the one-time molab mirror link. Because the
+notebook downloads the bundle when it is absent locally, a mirrored or forked molab
+notebook no longer needs a manual sidebar upload; the sidebar upload remains the fastest
+option for the primary workspace, since molab persists it across sessions. Use `--dry-run`
+to preview the commands without touching GitHub.
+
 ## Repository layout
 
 ```text

@@ -60,6 +60,7 @@ test = { cmd = "python -m pytest", env = { PYTHONPATH = "src", PYTHONUNBUFFERED 
 lint = "python -m ruff check src tests scripts notebooks"
 fmt = "python -m ruff format src tests scripts notebooks"
 molab-bundle = { cmd = "python scripts/build_molab_bundle.py", env = { PYTHONPATH = "src" } }
+molab-publish = { cmd = "python scripts/publish_molab.py", env = { PYTHONPATH = "src" } }
 notebooks = { cmd = "marimo run notebooks", env = { PYTHONPATH = "src" } }
 notebooks-edit = { cmd = "marimo edit notebooks", env = { PYTHONPATH = "src" } }
 public-data-surgeon = { cmd = "marimo run notebooks/03_public_data_surgeon.py", env = { PYTHONPATH = "src" } }
