@@ -57,8 +57,9 @@ influence = { features = ["influence"], solve-group = "influence", no-default-fe
 [tasks]
 ipp = { cmd = "python -m influence_pruning", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
 test = { cmd = "python -m pytest", env = { PYTHONPATH = "src", PYTHONUNBUFFERED = "1" } }
-lint = "python -m ruff check src tests"
-fmt = "python -m ruff format src tests"
+lint = "python -m ruff check src tests scripts"
+fmt = "python -m ruff format src tests scripts"
+molab-bundle = { cmd = "python scripts/build_molab_bundle.py", env = { PYTHONPATH = "src" } }
 notebooks = { cmd = "marimo run notebooks", env = { PYTHONPATH = "src" } }
 notebooks-edit = { cmd = "marimo edit notebooks", env = { PYTHONPATH = "src" } }
 public-data-surgeon = { cmd = "marimo run notebooks/03_public_data_surgeon.py", env = { PYTHONPATH = "src" } }

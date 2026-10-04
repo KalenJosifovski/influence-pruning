@@ -33,9 +33,37 @@ app = marimo.App(width="full")
 def _():
     import json
     import pathlib
+    import sys
     from textwrap import dedent
 
     import marimo as mo
+
+    _roots = [pathlib.Path.cwd()]
+    try:
+        _root = pathlib.Path(mo.notebook_dir())
+        if _root not in _roots:
+            _roots.append(_root)
+    except Exception:
+        pass
+
+    # molab bootstrap: restore the self-extracting upload bundle when running outside the
+    # repository checkout (no-op locally, where the zip is absent).
+    for _root in _roots:
+        _bundle_zip = _root / "molab_bundle.zip"
+        if _bundle_zip.is_file() and not (_root / "src" / "influence_pruning").is_dir():
+            import zipfile
+
+            with zipfile.ZipFile(_bundle_zip) as _archive:
+                _archive.extractall(_root)
+
+    def _add_to_path(candidate):
+        if (candidate / "influence_pruning").is_dir() and str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+
+    for _root in _roots:
+        _add_to_path(_root)
+        _add_to_path(_root / "src")
+
     import numpy as np
     import pandas as pd
     import plotly.express as px
@@ -203,7 +231,13 @@ def _(json, mo, np, pathlib, pd):
         refit. A cached copy is reused from ``analysis/effects_recomputed`` when present.
         """
         directory = pathlib.Path(run_dir)
-        destination = pathlib.Path("analysis/effects_recomputed") / directory.name
+        analysis_root = pathlib.Path("analysis/effects_recomputed")
+        if not analysis_root.parent.is_dir():
+            try:
+                analysis_root = pathlib.Path(mo.notebook_dir()) / "analysis/effects_recomputed"
+            except Exception:
+                pass
+        destination = analysis_root / directory.name
         if (destination / "paired_effects.parquet").is_file() and (
             destination / "bootstrap_draws.parquet"
         ).is_file():
@@ -295,9 +329,14 @@ def _(json, mo, np, pathlib, pd):
 
 
 @app.cell
-def _(ArtifactError, corrected_effects, pathlib, pd, verify_run):
+def _(ArtifactError, corrected_effects, mo, pathlib, pd, verify_run):
     def _load_runs():
         run_root = pathlib.Path("results/boostin_pruning")
+        if not run_root.is_dir():
+            try:
+                run_root = pathlib.Path(mo.notebook_dir()) / "results/boostin_pruning"
+            except Exception:
+                pass
         completed = sorted(
             path.parent
             for path in run_root.glob("*/run_facts.json")

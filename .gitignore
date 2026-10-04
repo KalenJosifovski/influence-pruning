@@ -13,6 +13,9 @@ __pycache__/
 # experiment outputs
 results/
 
+# molab upload bundles
+dist/
+
 # notebook figure exports and marimo session caches
 analysis/
 notebooks/__marimo__/

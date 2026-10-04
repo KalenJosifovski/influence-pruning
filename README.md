@@ -134,10 +134,24 @@ grid when `anywidget` is unavailable.
 
 ### Running on molab
 
-The notebook carries a PEP 723 header, and `anywidget` is a declared dependency, so molab
-installs it on import. molab grants additional files through the notebook's storage panel
-(sidebar uploads, or anything cached with `mo.persistent_cache`, are the only persistent
-paths), so the notebook needs the `influence_pruning` package plus these files per rotation:
+Build the self-extracting upload bundle:
+
+```bash
+pixi run -e dev molab-bundle     # writes dist/molab_bundle.zip (~53 MB)
+```
+
+Then, on molab:
+
+1. Create a new notebook and paste (or upload) `notebooks/04_pooling_surgery.py`.
+2. Open the Files panel (folder icon in the sidebar) and upload `dist/molab_bundle.zip`.
+3. Run the notebook. On first run it extracts the bundle into the session, adds `src/` to
+   the import path, and loads the three verified runs — no unzipping or path setup.
+4. If prompted, install `anywidget` from the package manager panel (molab also installs
+   packages on first import).
+
+Locally the extraction step is a no-op, so the same notebook file serves both environments.
+The bundle unpacks to the package, the three run directories that `verify_run` checks, and
+the corrected-effects cache. For reference, the uncompressed sizes are:
 
 | Bundle | Contents | All three rotations |
 | :--- | :--- | ---: |
@@ -145,10 +159,9 @@ paths), so the notebook needs the `influence_pruning` package plus these files p
 | Corrected effects | `analysis/effects_recomputed/<run>/paired_effects.parquet` | 0.2 MB |
 | Optional resample draws | `analysis/effects_recomputed/<run>/bootstrap_draws.parquet`; omit to let the notebook recompute in ~40 s | 6.8 MB ranked-only (32 MB full) |
 
-Nothing is too large for molab: the minimal working bundle is about 56 MB, and 63 MB with the
-ranked-only draw cache. Raw `results/` directories can otherwise stay local. The only other
-requirement is that the `influence_pruning` package is importable in the molab session
-(uploaded, installed from the repository, or supplied as a wheel).
+Nothing is too large for molab: the built zip is ~53 MB, comfortably within the notebook
+storage panel, and the notebook recomputes the draw cache in about 40 s if it is omitted.
+The bundle builder skips dry-run and stale-schema runs automatically.
 
 ## Repository layout
 
