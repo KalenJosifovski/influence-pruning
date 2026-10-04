@@ -49,7 +49,8 @@ def _():
     # fills in the release URL, and the download is persistently cached so only the first molab
     # session pays for the transfer.
     MOLAB_BUNDLE_URL = (
-        "https://github.com/KalenJosifovski/influence-pruning/releases/latest/download/molab_bundle.zip"
+        "https://github.com/KalenJosifovski/influence-pruning/"
+        "releases/latest/download/molab_bundle.zip"
     )
     _has_local_package = any(
         (_root / "influence_pruning").is_dir() or (_root / "src" / "influence_pruning").is_dir()

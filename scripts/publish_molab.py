@@ -57,7 +57,13 @@ def set_bundle_url(url: str) -> bool:
 
     def replacement(match: re.Match) -> str:
         indent = match.group(1)
-        return f'{indent}MOLAB_BUNDLE_URL = (\n{indent}    "{url}"\n{indent})'
+        prefix, _, asset = url.partition("/releases/latest/download/")
+        return (
+            f"{indent}MOLAB_BUNDLE_URL = (\n"
+            f'{indent}    "{prefix}/"\n'
+            f'{indent}    "releases/latest/download/{asset}"\n'
+            f"{indent})"
+        )
 
     source = NOTEBOOK.read_text()
     updated, replacements = URL_LINE.subn(replacement, source, count=1)
