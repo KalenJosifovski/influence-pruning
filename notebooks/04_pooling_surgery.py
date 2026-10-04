@@ -194,7 +194,9 @@ def _(json, mo, np, pathlib, pd):
         """
         directory = pathlib.Path(run_dir)
         destination = pathlib.Path("analysis/effects_recomputed") / directory.name
-        if (destination / "paired_effects.parquet").is_file():
+        if (destination / "paired_effects.parquet").is_file() and (
+            destination / "bootstrap_draws.parquet"
+        ).is_file():
             effects = pd.read_parquet(destination / "paired_effects.parquet")
             draws = pd.read_parquet(destination / "bootstrap_draws.parquet")
         else:

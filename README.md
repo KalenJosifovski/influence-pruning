@@ -139,16 +139,16 @@ installs it on import. molab grants additional files through the notebook's stor
 (sidebar uploads, or anything cached with `mo.persistent_cache`, are the only persistent
 paths), so the notebook needs the `influence_pruning` package plus these files per rotation:
 
-| Bundle | Files per rotation | All three rotations |
+| Bundle | Contents | All three rotations |
 | :--- | :--- | ---: |
-| Run frames | `COMPLETED`, `run_facts.json`, `partition_manifest.parquet`, `boostin_scores.parquet`, `arm_manifest.parquet`, `seed_metrics.parquet`, `predictions.parquet` | 26 MB |
+| Run directories | every file `verify_run` checks, including `predictions.parquet` and the results-level `bootstrap_draws.parquet` | 56 MB |
 | Corrected effects | `analysis/effects_recomputed/<run>/paired_effects.parquet` | 0.2 MB |
-| Resample draws | `analysis/effects_recomputed/<run>/bootstrap_draws.parquet` | 32 MB (ranked-only subset 7 MB) |
+| Optional resample draws | `analysis/effects_recomputed/<run>/bootstrap_draws.parquet`; omit to let the notebook recompute in ~40 s | 6.8 MB ranked-only (32 MB full) |
 
-Raw `results/` directories stay local; nothing the notebook reads exceeds roughly 60 MB even
-with every draw, so molab's persistent storage is not a constraint. The only real requirement
-is that the `influence_pruning` package is importable in the molab session (uploaded, installed
-from the repository, or supplied as a wheel).
+Nothing is too large for molab: the minimal working bundle is about 56 MB, and 63 MB with the
+ranked-only draw cache. Raw `results/` directories can otherwise stay local. The only other
+requirement is that the `influence_pruning` package is importable in the molab session
+(uploaded, installed from the repository, or supplied as a wheel).
 
 ## Repository layout
 
