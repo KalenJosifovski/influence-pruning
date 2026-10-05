@@ -353,6 +353,29 @@ function render({ model, el }) {
   el.append(controls, status);
 
   let phase = "idle";
+  let userSelectedVoice = false;
+
+  const preferredLanguage = () => model.get("lang") || "en-GB";
+
+  const normalizeLanguage = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/_/g, "-");
+
+  const voiceRank = (entry) => {
+    const lang = normalizeLanguage(entry.lang);
+    const preferred = normalizeLanguage(preferredLanguage());
+    if (lang === preferred) {
+      return 0;
+    }
+    if (lang.startsWith("en-gb")) {
+      return 1;
+    }
+    if (lang.startsWith("en")) {
+      return 2;
+    }
+    return 3;
+  };
 
   function updateButton() {
     if (!supported) {
@@ -378,15 +401,22 @@ function render({ model, el }) {
     }
     const voices = window.speechSynthesis.getVoices() || [];
     const previous = voice.value;
+    const sorted = [...voices].sort(
+      (left, right) =>
+        voiceRank(left) - voiceRank(right) || left.name.localeCompare(right.name),
+    );
     voice.innerHTML = "";
-    for (const entry of voices) {
+    for (const entry of sorted) {
       const option = document.createElement("option");
       option.value = entry.name;
       option.textContent = `${entry.name} · ${entry.lang}`;
       voice.append(option);
     }
-    if (previous) {
+    if (previous && voices.some((entry) => entry.name === previous)) {
       voice.value = previous;
+    } else if (!userSelectedVoice && sorted.length) {
+      const preferred = sorted.find((entry) => voiceRank(entry) <= 2) || sorted[0];
+      voice.value = preferred.name;
     }
     voice.disabled = voices.length === 0;
   }
@@ -398,6 +428,8 @@ function render({ model, el }) {
     const chosen = voices.find((entry) => entry.name === voice.value);
     if (chosen) {
       utterance.voice = chosen;
+    } else {
+      utterance.lang = preferredLanguage();
     }
     utterance.rate = Number(rate.value) || 1;
     utterance.onend = () => setPhase("idle");
@@ -421,6 +453,9 @@ function render({ model, el }) {
     }
   });
 
+  voice.addEventListener("change", () => {
+    userSelectedVoice = true;
+  });
   rate.addEventListener("input", () => {
     rateLabel.textContent = `${Number(rate.value).toFixed(1)}×`;
   });
@@ -519,6 +554,7 @@ if anywidget is not None:
 
         :param text: passage to read aloud.
         :param label: idle button label, for example "Hear the verdict".
+        :param lang: BCP-47 language tag used to pick a default voice, e.g. ``en-GB``.
         """
 
         _esm = _SPEAKER_ESM
@@ -526,6 +562,7 @@ if anywidget is not None:
 
         text = traitlets.Unicode("").tag(sync=True)
         label = traitlets.Unicode("Listen").tag(sync=True)
+        lang = traitlets.Unicode("en-GB").tag(sync=True)
 
 else:  # pragma: no cover - exercised only when anywidget is absent
     MoleculeGrid = None  # type: ignore[assignment,misc]

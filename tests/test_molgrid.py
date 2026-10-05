@@ -114,9 +114,10 @@ def test_scaffold_bars_is_an_anywidget_with_synced_traits() -> None:
 
 def test_speaker_is_an_anywidget_with_synced_traits() -> None:
     speaker = Speaker(text="Hello", label="Listen")
-    assert set(speaker.traits(sync=True)) >= {"text", "label"}
+    assert set(speaker.traits(sync=True)) >= {"text", "label", "lang"}
     assert speaker.text == "Hello"
     assert speaker.label == "Listen"
+    assert speaker.lang == "en-GB"
 
 
 def test_selection_ids_resolves_every_marimo_payload_shape() -> None:
